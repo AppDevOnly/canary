@@ -1,12 +1,10 @@
 # Canary
 
-**Test code before you trust it.**
+**Automated security testing for code — no security background needed.**
 
-Canary is a Claude skill that evaluates GitHub repos, local projects, pip packages, and npm packages for security issues, code quality problems, dependency vulnerabilities, and bugs — before you install or run anything.
+Canary is a Claude Code skill that evaluates GitHub repos, local projects, pip packages, and npm packages for security issues, vulnerabilities, hardcoded secrets, and bugs. It gives you a plain-English verdict before you install or run anything.
 
 Named after the canary in a coal mine: it goes in first so you don't have to.
-
----
 
 ## What it checks
 
@@ -14,14 +12,12 @@ Named after the canary in a coal mine: it goes in first so you don't have to.
 - **Dependency vulnerabilities** — known CVEs (pip-audit, npm-audit), license compliance
 - **Secrets** — API keys, tokens, and credentials accidentally committed to source
 - **Code quality** — bad practices, anti-patterns, complexity, missing tests
-- **Bugs** — runtime errors, crash reproduction, edge cases
+- **Bugs** — runtime errors, edge cases, logic gaps
 - **Undocumented requirements** — hidden API keys, missing tools, silent failures
 
 Every finding is rated: `CRITICAL / HIGH / MEDIUM / LOW / INFO`
 
 Every report ends with a plain-English verdict: ✅ Safe / ⚠️ Caution / ❌ Unsafe
-
----
 
 ## Install (one line)
 
@@ -39,10 +35,14 @@ This copies `canary.md` into `~/.claude/commands/` so the `/canary` command is a
 
 **Requirements:** [Claude Code](https://github.com/anthropics/claude-code) installed.
 
----
-
 ## Usage
 
+First, launch Claude Code in your terminal:
+```
+claude
+```
+
+Then, inside the Claude Code session, run:
 ```
 /canary <target>
 ```
@@ -53,34 +53,37 @@ Where `<target>` is:
 - A pip package: `/canary pip:requests`
 - An npm package: `/canary npm:lodash`
 
-Canary walks you through the evaluation step by step and produces a structured report at the end.
+Canary will ask how thorough you want it to be, then walk you through the evaluation step by step.
 
----
+## Evaluation levels
+
+**Quick** — Scans the most important files (entry points, install scripts, anything that runs at startup) for red flags. Takes about a minute.
+
+**Medium** — Reads the full codebase, checks all dependencies for known vulnerabilities, scans for accidentally committed secrets, and assesses code quality. Takes a few minutes.
+
+**Full** — Everything in Medium, plus runs the code in an isolated sandbox to watch what it actually does on your machine. Requires Windows Sandbox or Docker.
 
 ## What you get
 
-A structured report covering:
+A structured plain-text report covering:
 
 1. **Verdict** — Safe / Caution / Unsafe with one-sentence rationale
-2. **Security findings** — network, process, persistence, credentials
-3. **Dependency audit** — CVEs, outdated packages, license issues
-4. **Code quality** — bad practices, complexity, test coverage
-5. **Bugs found** — with reproduction steps and suggested fixes
-6. **Recommendation** — install or not, with specific caveats
+2. **Executive summary** — non-technical overview with risk counts
+3. **Findings** — each issue with severity, plain-English explanation, and fix
+4. **Security analysis** — network, process, persistence, credentials
+5. **Dependency audit** — CVEs, outdated packages, license issues
+6. **Code quality** — bad practices, complexity, test coverage
+7. **Recommendation** — exactly what to do before you install or use it
 
-See [examples/](examples/) for sample reports.
-
----
+Reports are saved to `~/canary-reports/`.
 
 ## Who this is for
 
-Independent developers and tinkerers who want to quickly check code they're about to install — without needing a security background or a dedicated security team.
-
----
+Anyone who wants to check code before trusting it — developers, tinkerers, and non-technical users alike. You don't need a security background to use Canary or understand its reports.
 
 ## Contributing
 
-Issues and PRs welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
+Issues and PRs welcome.
 
 ---
 
