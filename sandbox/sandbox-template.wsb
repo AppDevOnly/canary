@@ -1,0 +1,29 @@
+<Configuration>
+  <!-- Networking enabled so canary can monitor traffic and install dependencies -->
+  <Networking>Enable</Networking>
+
+  <MappedFolders>
+    <!-- Sandbox scripts (bootstrap + setup.ps1 written by canary) — read-only -->
+    <MappedFolder>
+      <HostFolder>C:\sandbox\scripts</HostFolder>
+      <SandboxFolder>C:\sandbox\scripts</SandboxFolder>
+      <ReadOnly>true</ReadOnly>
+    </MappedFolder>
+
+    <!-- Output directory — read-write so results are visible on host in real time -->
+    <MappedFolder>
+      <HostFolder>C:\sandbox\output</HostFolder>
+      <SandboxFolder>C:\sandbox\output</SandboxFolder>
+      <ReadOnly>false</ReadOnly>
+    </MappedFolder>
+
+    <!-- Sysinternals (Procmon, etc.) — mapped in by canary if present on host -->
+    <!-- SYSINTERNALS_BLOCK -->
+
+  </MappedFolders>
+
+  <!-- bootstrap.cmd waits for mapped folders then launches setup.ps1 -->
+  <LogonCommand>
+    <Command>cmd /c C:\sandbox\scripts\bootstrap.cmd</Command>
+  </LogonCommand>
+</Configuration>
