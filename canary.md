@@ -4,22 +4,13 @@ description: Evaluate code for security issues, dependency vulnerabilities, bugs
 
 # /canary
 
-Evaluate code before you trust it. Canary checks GitHub repos, local projects, pip packages, and npm packages for security issues, dependency vulnerabilities, hardcoded secrets, bugs, and code quality problems.
+Evaluate code before you trust it. Canary reads source code, checks for security issues, scans for known vulnerabilities, and can run the code in an isolated sandbox — then gives you a plain-English verdict.
 
 ## Usage
 ```
 /canary <target>
 ```
 Where `<target>` is a GitHub URL, local path, `pip:<package>`, or `npm:<package>`.
-
-## What Canary does
-
-1. **Static analysis** — read source before anything runs; flag suspicious patterns
-2. **Secrets scan** — detect hardcoded API keys, tokens, credentials
-3. **Dependency audit** — CVEs, outdated packages, license issues
-4. **Code quality** — bad practices, anti-patterns, complexity, missing tests
-5. **Dynamic sandbox** *(if available)* — run in isolation with network + process monitoring
-6. **Structured report** — verdict, findings table, fix recommendations
 
 ---
 
@@ -31,9 +22,19 @@ Parse `<target>`:
 - **`pip:<name>`** → fetch from PyPI: source tarball or wheel, read metadata + scripts
 - **`npm:<name>`** → fetch from npmjs: read package.json, scripts, index
 
-Ask the user: "I'll evaluate `<target>`. Should I just do a quick static check, or run it in a sandbox too? (quick / full)"
-- **Quick** — static analysis only (Phases 2–4). Faster, no sandbox needed.
-- **Full** — static + dynamic sandbox run (all phases). Requires Windows Sandbox or Docker.
+If no target is provided, ask the user what they'd like to evaluate and explain the supported formats.
+
+**Before starting, tell the user:**
+
+> "Everything I do during this evaluation is [Claude] — I'm fetching and reading code on your behalf using the GitHub API and other tools. I won't run anything from this software on your machine unless you choose Full mode, in which case those actions will be clearly labeled [software under test] and I'll confirm with you before running anything."
+
+Then ask:
+
+> "How thorough should I be?
+>
+> - **Quick** — I'll scan the most important files (entry points, install scripts, anything that runs at startup) for red flags. Takes about a minute.
+> - **Medium** — I'll read the full codebase, check all dependencies for known security vulnerabilities, scan for accidentally committed secrets, and assess code quality. Takes a few minutes.
+> - **Full** — Everything in Medium, plus I'll run it in an isolated sandbox and watch what it actually does on your machine (what network connections it makes, what files it touches, whether it tries to persist anything). Takes longer and requires Windows Sandbox or Docker."
 
 ---
 
@@ -41,41 +42,41 @@ Ask the user: "I'll evaluate `<target>`. Should I just do a quick static check, 
 
 ### 2a. Code inspection
 
-Read these files first (in order of risk):
+**Quick and above:** Read these files first (in order of risk):
 1. Entry points: `__main__.py`, `main.py`, `index.js`, `cli.py`, `app.py`
 2. Install/setup scripts: `setup.py`, `pyproject.toml`, `package.json`, `Makefile`, `*.sh`, `*.ps1`
 3. Any file with network calls, subprocess calls, or `eval()`/`exec()`
 
+**Medium and above:** Read the full codebase, prioritizing files with network I/O, file I/O, subprocess calls, authentication, and data handling.
+
 Flag these patterns (rate each CRITICAL / HIGH / MEDIUM / LOW / INFO):
 
-| Pattern | Severity | Example |
-|---|---|---|
-| `eval()` / `exec()` on external input | CRITICAL | `eval(response.text)` |
-| Subprocess with shell=True on external input | CRITICAL | `subprocess.run(user_input, shell=True)` |
-| Hardcoded IP addresses (non-localhost) | HIGH | `"192.168.1.100"` in source |
-| Outbound connections to unexpected domains | HIGH | `requests.get("http://evil.com")` |
-| `os.system()` / `subprocess` calls | MEDIUM | May be legitimate; check args |
-| `install_requires` with no version pins | MEDIUM | Unpinned deps allow supply chain attacks |
-| `postinstall` / `prepare` scripts in package.json | HIGH | Runs at install time, before user review |
-| `__import__` / dynamic imports | MEDIUM | Can obfuscate what's loaded |
-| Base64-encoded strings | HIGH | Common obfuscation technique |
-| Writes to startup/autorun locations | CRITICAL | Registry Run keys, ~/.bashrc, cron |
+- `eval()` / `exec()` on external input — **CRITICAL** (e.g. `eval(response.text)`)
+- Subprocess with shell=True on external input — **CRITICAL**
+- Writes to startup/autorun locations — **CRITICAL** (Registry Run keys, `~/.bashrc`, cron)
+- Outbound connections to unexpected domains — **HIGH**
+- `postinstall` / `prepare` scripts in package.json — **HIGH** (runs at install time, before review)
+- Base64-encoded strings — **HIGH** (common obfuscation technique)
+- Hardcoded IP addresses (non-localhost) — **HIGH**
+- `os.system()` / `subprocess` calls — **MEDIUM** (may be legitimate; check args)
+- `install_requires` with no version pins — **MEDIUM** (unpinned deps allow supply chain attacks)
+- `__import__` / dynamic imports — **MEDIUM** (can obfuscate what's loaded)
 
 ### 2b. Secrets scan
 
+**Medium and above only.**
+
 Search for patterns indicating hardcoded secrets:
+- Long random strings adjacent to words: key, token, secret, password, api, auth
+- AWS key patterns: `AKIA[0-9A-Z]{16}`
+- Private key headers: `-----BEGIN (RSA|EC|DSA|OPENSSH) PRIVATE KEY-----`
+- Common service patterns: `sk-[a-zA-Z0-9]{32,}`, `ghp_[a-zA-Z0-9]{36}`
 
-```
-# Key patterns to search:
-- [A-Za-z0-9]{32,} adjacent to words: key, token, secret, password, api, auth
-- AWS key patterns: AKIA[0-9A-Z]{16}
-- Private key headers: -----BEGIN (RSA|EC|DSA|OPENSSH) PRIVATE KEY-----
-- Common service patterns: sk-[a-zA-Z0-9]{32,}, ghp_[a-zA-Z0-9]{36}
-```
-
-Report any matches with file + line number. Rate HIGH if found in committed source.
+Report any matches with file + line number. Rate HIGH if found in committed source. Do NOT print the full value — show first 8 chars + `...`
 
 ### 2c. Dependency audit
+
+**Medium and above only.**
 
 **Python projects** — check `requirements.txt`, `pyproject.toml`, `setup.py`:
 ```bash
@@ -87,20 +88,24 @@ pip-audit -r requirements.txt --format json 2>/dev/null || echo "pip-audit not a
 npm audit --json 2>/dev/null || echo "npm audit not available"
 ```
 
-If audit tools aren't available, manually check the top-level dependencies against known CVE patterns and flag any that are:
+If audit tools aren't available, manually check top-level dependencies and flag any that are:
 - More than 2 major versions behind latest
-- Known to have had critical CVEs (e.g., `log4j`, `lodash < 4.17.21`, `requests < 2.20.0`)
+- Known to have had critical CVEs (e.g. `log4j`, `lodash < 4.17.21`, `requests < 2.20.0`)
 
 ### 2d. License compliance
 
+**Medium and above only.**
+
 Summarize licenses used by direct dependencies. Flag:
-- GPL/AGPL in commercial contexts (MEDIUM — may require source disclosure)
-- Unknown/unlicensed packages (HIGH — legal risk)
-- License mismatches (e.g., project claims MIT but depends on GPL)
+- GPL/AGPL in commercial contexts — MEDIUM (may require source disclosure)
+- Unknown/unlicensed packages — HIGH (legal risk)
+- License mismatches (project claims MIT but depends on GPL)
 
 ---
 
 ## Phase 3 — Code quality assessment
+
+**Medium and above only.**
 
 Rate each finding CRITICAL / HIGH / MEDIUM / LOW / INFO.
 
@@ -110,7 +115,6 @@ Rate each finding CRITICAL / HIGH / MEDIUM / LOW / INFO.
 - Mutable default arguments (`def foo(x=[])`)
 - `TODO`/`FIXME`/`HACK` comments in critical paths
 - No test files present (`test_*.py`, `*.test.js`, `spec/`)
-- Test coverage below 30% if coverage data available
 - Functions longer than 100 lines (complexity risk)
 - Hardcoded file paths (portability issues)
 - `print()` / `console.log()` used for error handling instead of logging
@@ -125,7 +129,9 @@ Rate each finding CRITICAL / HIGH / MEDIUM / LOW / INFO.
 
 ## Phase 4 — Dynamic sandbox (full mode only)
 
-*Skip this phase if user chose "quick" or no sandbox is available.*
+*Skip this phase if the user chose Quick or Medium, or if no sandbox is available.*
+
+**Important:** Before running anything from the target, warn the user if static analysis already found serious issues (CRITICAL findings). Give them the option to stop here rather than run potentially hostile code even in a sandbox.
 
 If Windows Sandbox is available:
 ```
@@ -135,7 +141,6 @@ If Windows Sandbox is available:
 
 If Docker is available (cross-platform fallback):
 ```bash
-# Build a minimal isolation container
 docker run --rm --network=none -v "$(pwd):/target:ro" python:3.11-slim bash -c "
     cd /target && pip install . 2>&1 | tail -20
     echo 'Install complete'
@@ -148,56 +153,125 @@ Note: Docker provides filesystem isolation but limited network/process monitorin
 
 ## Phase 5 — Write the report
 
-Write the report to:
-- **Local:** `~/canary-reports/<target-name>-<date>-canary-report.md`
+Write the report to `~/canary-reports/<target-name>-<date>-canary-report.md`
 
-Structure:
+Format for plain-text readability — no markdown tables, no `---` dividers, no heavy bold syntax. The report must look clean when viewed as raw text in an editor, not just when rendered.
 
-```markdown
-# Canary Report: <target> — <date>
+```
+# Canary Security Report: <target>
 
-## Verdict
-✅ Safe / ⚠️ Caution / ❌ Unsafe
+Date: <date>
+Target: <url or path>
+Evaluation: <Quick / Medium / Full> — Static Analysis
+Tool: Canary v2.0
 
-**One-sentence summary of why.**
 
----
+## Verdict: ✅ Safe / ⚠️ Caution / ❌ Unsafe
+
+One or two plain-English sentences summarizing the verdict and the key reason for it.
+
+
+## Executive Summary
+
+One paragraph describing what the target is and what was found at a high level.
+Written for a non-technical reader.
+
+  Critical   0
+  High       0
+  Medium     0
+  Low        0
+  Info       0
+
+Recommendation: One sentence. What should the user do?
+
 
 ## Findings
 
-| # | Severity | Category | Finding | File:Line |
-|---|---|---|---|---|
-| 1 | CRITICAL | Security | ... | src/main.py:42 |
-| 2 | HIGH | Secrets | ... | config.py:15 |
-| 3 | MEDIUM | Quality | ... | utils.py:88 |
 
----
+### 1. <Short title>
+  Severity:  CRITICAL / HIGH / MEDIUM / LOW / INFO
+  Category:  Security / Secrets / Dependencies / Quality / Bug
+  File:      path/to/file.py:42
+
+Two or three sentences explaining what this is and why it matters in plain English.
+
+Fix:
+  - Specific actionable step
+  - Second step if needed
+
+(Repeat for each finding. If no findings: "No issues found.")
+
 
 ## Security Analysis
-[network, process, persistence, credential handling]
+
+Network activity    One line summary.
+Credentials         One line summary.
+Persistence         One line summary.
+Process behavior    One line summary.
+
 
 ## Dependency Audit
-[CVEs found, license issues, version lag]
+
+One paragraph. Note if audit tools weren't available. If nothing found, say so.
+If this was a Quick evaluation, write: "Not evaluated — run a Medium or Full evaluation to check dependencies."
+
 
 ## Code Quality
-[anti-patterns, complexity, test coverage, undocumented requirements]
+
+One paragraph. Anti-patterns, complexity, test coverage, undocumented requirements.
+Keep it brief. If nothing notable, say so.
+If this was a Quick evaluation, write: "Not evaluated — run a Medium or Full evaluation for code quality analysis."
+
+
+## Sandbox Results
+
+Only include this section for Full evaluations. Describe what the code actually did when run:
+network connections observed, files created or modified, processes spawned, anything unexpected.
+If this was a Quick or Medium evaluation, write: "Not evaluated — run a Full evaluation to observe runtime behavior."
+
 
 ## Bugs Found
-[specific bugs with file:line, description, suggested fix]
+
+Describe each bug with file:line, what it does, and the fix. If none, say so.
+If this was a Quick evaluation, write: "Not evaluated — run a Medium or Full evaluation for bug analysis."
+
 
 ## Recommendation
-[Install or not. Specific caveats and required actions before installing.]
+
+Plain-English verdict: safe to use or not, and exactly what to do.
+
+Before you use it:
+  1. First required action
+  2. Second required action
+
+Optional:
+  - Nice-to-have improvement
 ```
+
+After writing the report, ask the user: "Want me to save a note so future sessions know this evaluation is done?"
 
 ---
 
 ## Output rules
 
 - **Verdict at the top** — ✅ / ⚠️ / ❌ — users need to see this immediately
-- **Plain English** — explain what each finding means and why it matters
+- **Plain English** — explain what each finding means and why it matters, as if the user has no security background
 - **Actionable** — every finding includes a suggested fix or workaround
-- **Honest about limits** — note if a check wasn't possible (e.g., tool not installed)
-- Rate every finding: `CRITICAL / HIGH / MEDIUM / LOW / INFO`
+- **Honest about limits** — note if a check wasn't possible (e.g. tool not installed, private repo)
+- **Rate every finding:** CRITICAL / HIGH / MEDIUM / LOW / INFO
+- **No unsolicited comparisons** — don't compare to other reports unless the user asks
+
+---
+
+## Edge cases
+
+**No target provided:** Ask what they'd like to evaluate and show supported formats. Don't error.
+
+**Private repo / access failure:** Tell the user clearly: "I wasn't able to access this repo — it may be private or the URL may be incorrect. If it's private, make sure you're logged in with `gh auth login`."
+
+**Monorepo / multi-package repo:** List the packages/apps found and ask which one(s) to evaluate, or offer to evaluate all of them.
+
+**Target looks hostile during static analysis:** If CRITICAL findings appear before Phase 4, warn the user: "I've already found serious issues in the static analysis. Do you still want me to run this in a sandbox, or is the static report enough?" Don't proceed to sandbox automatically.
 
 ---
 
