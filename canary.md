@@ -193,13 +193,33 @@ Rate each finding CRITICAL / HIGH / MEDIUM / LOW / INFO.
 
 If Windows Sandbox is available:
 
+**Pre-flight: check Smart App Control (SAC) state before launching.**
+
+```powershell
+powershell -NoProfile -Command "(Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\CI\Policy' -ErrorAction SilentlyContinue).VerifiedAndReputablePolicyState"
+```
+
+- `0` = Off — proceed normally
+- `1` = Evaluation mode — unsigned binaries may be blocked; warn the user
+- `2` = On — unsigned binaries **will** be blocked; warn the user that dynamic analysis results may be limited
+
+If SAC is On or Evaluation, tell the user:
+> "Smart App Control is active on your machine. This may prevent unsigned binaries from running inside the sandbox. I'll attempt to disable it for the sandbox session, but if the binary is blocked, I'll note it as a finding and write the report based on static analysis."
+
 Before launching, warn the user:
 
 > "I'm about to start the sandbox. Here's what to expect:
 > - A Windows Sandbox window will open — this is normal. Don't close it.
 > - Additional windows may appear as the software launches inside the sandbox.
 > - **You don't need to interact with any of those windows.** Just keep an eye on this Claude window — I'll report everything I observe here as it happens.
-> - When the evaluation is done, the sandbox will close automatically and I'll write the report."
+> - When the evaluation is done, the sandbox will close automatically and I'll write the report.
+> - **If anything looks wrong or gets stuck, just tell me in plain English** — describe what you're seeing and I'll figure out what to do. You don't need to know any commands."
+
+**After the sandbox run, read `stream.log` and `setup.log` to determine outcome:**
+
+- If `setup.log` contains `"RESULT: Binary could not be launched"` — **do not retry**. Record as a sandbox finding: "Binary blocked — likely SAC/WDAC policy or missing dependency. Dynamic analysis not possible on this system without further configuration." Proceed to write the report.
+- If the sandbox exited before `setup.log` appeared (mapped-folder failure) — retry **once only**, then report the failure.
+- If the binary launched successfully — report network connections, file/registry artifacts, and persistence behavior from the logs.
 
 ```
 → Use the /test-install protocol for full sandbox evaluation
@@ -318,6 +338,18 @@ Optional:
 ```
 
 After writing the report, ask the user: "Want me to save a note so future sessions know this evaluation is done?"
+
+---
+
+## Troubleshooting
+
+At any point during the evaluation, the user can describe a problem in plain English and canary should respond helpfully. Examples:
+- "something popped up asking me to allow a network connection" → advise what to do
+- "the sandbox window closed early" → diagnose and offer to re-run
+- "it's been sitting here for 5 minutes" → check what's stuck and recover
+- "I see an error that says X" → interpret and fix
+
+Never require the user to run commands themselves to diagnose an issue. If something is wrong, canary figures it out and handles it.
 
 ---
 
