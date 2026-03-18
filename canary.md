@@ -44,15 +44,28 @@ If no target is provided, ask the user what they'd like to evaluate and explain 
 
 **After the user chooses a tier, present a single consent summary before doing anything else:**
 
-> "Here's what I'll do during this evaluation:
-> - [Claude] Fetch and read source code from [target] using the GitHub API
-> - [Claude] Run dependency audit commands (`pip-audit`, `npm audit`) on your machine
-> - [Claude] Write a report to `~/canary-reports/`
-> *(Full only)* [software under test] Run the code in Windows Sandbox and observe its behavior
->
-> I'll ask for permission once here, then run the full evaluation without further interruptions. Ready to proceed?"
+Tailor the consent block to the chosen tier. Use this exact template:
 
-Wait for a yes before starting. Do not ask for permission again during the evaluation unless an unexpected action comes up that wasn't covered above.
+> "Here's everything I'll do during this [Quick / Medium / Full] evaluation — I'll ask once and then run without interruptions.
+>
+> **[Claude] — all of this is me, not the software being evaluated:**
+> - Fetch repo metadata and file tree from GitHub API
+> - Read source files directly from GitHub (no download to your machine)
+> - Search for secrets, hardcoded credentials, and suspicious patterns in the code
+> *(Medium + Full only)* Run `pip-audit` and/or `npm audit` on your machine to check for known CVEs
+> *(Medium + Full only)* Read `~/.claude/settings.json` to check tool availability
+> - Write a report to `~/canary-reports/`
+> - Save a note to memory so future sessions know this eval is done
+>
+> *(Full only)* **[software under test] — this is the code running on your machine:**
+> - Download the target release binary to a temporary folder
+> - Launch Windows Sandbox (or Docker) and run the software inside it
+> - Observe what network connections it makes, what files it creates, whether it tries to persist
+> - Sandbox is destroyed after evaluation — nothing persists to your main system
+>
+> Ready to proceed?"
+
+Wait for a yes before starting. Do not ask for permission again during the evaluation unless a genuinely unexpected action comes up that wasn't listed above.
 
 **After the user chooses Full mode, run a preflight check before touching the target:**
 
