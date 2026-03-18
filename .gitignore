@@ -1,0 +1,7 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Reports generated locally (users shouldn't commit their own reports)
+~/canary-reports/
+*.local-report.md
