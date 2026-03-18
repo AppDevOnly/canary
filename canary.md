@@ -192,6 +192,15 @@ Rate each finding CRITICAL / HIGH / MEDIUM / LOW / INFO.
 **Important:** Before running anything from the target, warn the user if static analysis already found serious issues (CRITICAL findings). Give them the option to stop here rather than run potentially hostile code even in a sandbox.
 
 If Windows Sandbox is available:
+
+Before launching, warn the user:
+
+> "I'm about to start the sandbox. Here's what to expect:
+> - A Windows Sandbox window will open — this is normal. Don't close it.
+> - Additional windows may appear as the software launches inside the sandbox.
+> - **You don't need to interact with any of those windows.** Just keep an eye on this Claude window — I'll report everything I observe here as it happens.
+> - When the evaluation is done, the sandbox will close automatically and I'll write the report."
+
 ```
 → Use the /test-install protocol for full sandbox evaluation
 → See ~/.claude/commands/test-install.md for the complete sandbox procedure
