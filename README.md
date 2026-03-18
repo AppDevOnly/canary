@@ -25,8 +25,14 @@ Every report ends with a plain-English verdict: ✅ Safe / ⚠️ Caution / ❌ 
 
 ## Install (one line)
 
+**macOS / Linux / Git Bash:**
 ```bash
 curl -sSL https://raw.githubusercontent.com/AppDevOnly/canary/main/install.sh | bash
+```
+
+**PowerShell (Windows):**
+```powershell
+irm https://raw.githubusercontent.com/AppDevOnly/canary/main/install.ps1 | iex
 ```
 
 This copies `canary.md` into `~/.claude/commands/` so the `/canary` command is available in Claude Code.
