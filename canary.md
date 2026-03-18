@@ -1,8 +1,10 @@
 ---
 description: Evaluate code for security issues, dependency vulnerabilities, bugs, and quality problems before installing
+version: 2.3
 ---
 
 # /canary
+# canary-version: 2.3
 
 Evaluate code before you trust it. Canary reads source code, checks for security issues, scans for known vulnerabilities, and can run the code in an isolated sandbox — then gives you a plain-English verdict.
 
