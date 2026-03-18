@@ -14,6 +14,12 @@ Where `<target>` is a GitHub URL, local path, `pip:<package>`, or `npm:<package>
 
 ---
 
+## Tool availability
+
+**Always use `gh api <endpoint> --jq '<filter>'` for GitHub API calls and JSON parsing.** Do not use standalone `jq`, `python3`, or `python` for JSON parsing — they are not reliably available on Windows. If you need to parse JSON outside of a `gh api` call, use `grep` or string matching instead.
+
+---
+
 ## Phase 1 — Identify the target
 
 Parse `<target>`:
@@ -26,7 +32,7 @@ If no target is provided, ask the user what they'd like to evaluate and explain 
 
 **Before starting, tell the user:**
 
-> "Canary v2.2
+> "Canary v2.3
 >
 > Everything I do during this evaluation is [Claude] — I'm fetching and reading code on your behalf using the GitHub API and other tools. I won't run anything from this software on your machine unless you choose Full mode, in which case those actions will be clearly labeled [software under test] and I'll confirm with you before running anything."
 
@@ -165,7 +171,7 @@ Format for plain-text readability — no markdown tables, no `---` dividers, no 
 Date: <date>
 Target: <url or path>
 Evaluation: <Quick / Medium / Full> — Static Analysis
-Tool: Canary v2.2
+Tool: Canary v2.3
 
 
 ## Verdict: ✅ Safe / ⚠️ Caution / ❌ Unsafe
