@@ -204,7 +204,9 @@ Fix:
 
 ## Security Analysis
 
-Network activity    One line summary.
+Based on static code review only. Full mode required to observe actual runtime behavior.
+
+Network activity    One line summary of what the code is written to contact.
 Credentials         One line summary.
 Persistence         One line summary.
 Process behavior    One line summary.
@@ -266,6 +268,8 @@ After writing the report, ask the user: "Want me to save a note so future sessio
 ## Edge cases
 
 **No target provided:** Ask what they'd like to evaluate and show supported formats. Don't error.
+
+**Resuming a paused evaluation:** If memory indicates an evaluation was paused waiting for tier selection, re-present the exact tier prompt from Phase 1 (Quick / Medium / Full with the canonical descriptions). Do not paraphrase or invent alternate tier names.
 
 **Private repo / access failure:** Tell the user clearly: "I wasn't able to access this repo — it may be private or the URL may be incorrect. If it's private, make sure you're logged in with `gh auth login`."
 
