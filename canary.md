@@ -18,6 +18,18 @@ Where `<target>` is a GitHub URL, local path, `pip:<package>`, or `npm:<package>
 
 **Always use `gh api <endpoint> --jq '<filter>'` for GitHub API calls and JSON parsing.** Do not use standalone `jq`, `python3`, or `python` for JSON parsing — they are not reliably available on Windows. If you need to parse JSON outside of a `gh api` call, use `grep` or string matching instead.
 
+Before starting the evaluation, check for required tools and offer to install any that are missing. Do not skip silently — pause, walk the user through the install, then resume.
+
+| Tool | Required for | Install command |
+|------|-------------|-----------------|
+| `gh` | All GitHub targets | `winget install GitHub.cli` (Windows) / `brew install gh` (Mac/Linux) |
+| `pip-audit` | Python dependency audit | `pip install pip-audit` |
+| `npm` | Node dependency audit | Install Node.js from https://nodejs.org |
+| Docker | Full mode (sandbox fallback) | `winget install Docker.DockerDesktop` |
+| Windows Sandbox | Full mode (preferred on Windows) | Enable via "Turn Windows features on or off" → Windows Sandbox |
+
+If a tool is missing, say: "I need [tool] to [do X]. Want me to walk you through installing it? It'll take about [time]. Once it's installed I'll pick up right where we left off." Then install, verify, and continue.
+
 ---
 
 ## Phase 1 — Identify the target
