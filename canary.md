@@ -9,8 +9,30 @@ Evaluate code before you trust it. Canary reads source code, checks for security
 ## Usage
 ```
 /canary <target>
+/canary update
 ```
 Where `<target>` is a GitHub URL, local path, `pip:<package>`, or `npm:<package>`.
+
+**`/canary update`** — checks your installed version against the repo and reinstalls if behind.
+
+---
+
+## Self-update
+
+If the user types `update` (or `/canary update`) with no target:
+
+1. Read the local skill file version from the `# /canary` header or the version line in `canary.md`
+2. Fetch the remote version:
+```bash
+gh api repos/AppDevOnly/canary/contents/canary.md --jq '.content' | base64 -d | grep "Canary v"
+```
+3. Compare. If behind (or if the user just wants a clean reinstall), run:
+```powershell
+irm https://raw.githubusercontent.com/AppDevOnly/canary/main/install.ps1 | iex
+```
+4. Tell the user what was updated and remind them to restart Claude Code to pick up the new skill file.
+
+If already up to date, say so and stop — don't reinstall unnecessarily.
 
 ---
 
