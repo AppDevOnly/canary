@@ -26,7 +26,9 @@ If no target is provided, ask the user what they'd like to evaluate and explain 
 
 **Before starting, tell the user:**
 
-> "Everything I do during this evaluation is [Claude] — I'm fetching and reading code on your behalf using the GitHub API and other tools. I won't run anything from this software on your machine unless you choose Full mode, in which case those actions will be clearly labeled [software under test] and I'll confirm with you before running anything."
+> "Canary v2.1
+>
+> Everything I do during this evaluation is [Claude] — I'm fetching and reading code on your behalf using the GitHub API and other tools. I won't run anything from this software on your machine unless you choose Full mode, in which case those actions will be clearly labeled [software under test] and I'll confirm with you before running anything."
 
 Then ask:
 
@@ -163,7 +165,7 @@ Format for plain-text readability — no markdown tables, no `---` dividers, no 
 Date: <date>
 Target: <url or path>
 Evaluation: <Quick / Medium / Full> — Static Analysis
-Tool: Canary v2.0
+Tool: Canary v2.1
 
 
 ## Verdict: ✅ Safe / ⚠️ Caution / ❌ Unsafe
