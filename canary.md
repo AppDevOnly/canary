@@ -42,6 +42,18 @@ Parse `<target>`:
 
 If no target is provided, ask the user what they'd like to evaluate and explain the supported formats.
 
+**After the user chooses a tier, present a single consent summary before doing anything else:**
+
+> "Here's what I'll do during this evaluation:
+> - [Claude] Fetch and read source code from [target] using the GitHub API
+> - [Claude] Run dependency audit commands (`pip-audit`, `npm audit`) on your machine
+> - [Claude] Write a report to `~/canary-reports/`
+> *(Full only)* [software under test] Run the code in Windows Sandbox and observe its behavior
+>
+> I'll ask for permission once here, then run the full evaluation without further interruptions. Ready to proceed?"
+
+Wait for a yes before starting. Do not ask for permission again during the evaluation unless an unexpected action comes up that wasn't covered above.
+
 **After the user chooses Full mode, run a preflight check before touching the target:**
 
 Check all tools needed for Full mode in one pass:
