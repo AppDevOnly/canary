@@ -221,6 +221,46 @@ Before launching, warn the user:
 - If the sandbox exited before `setup.log` appeared (mapped-folder failure) — retry **once only**, then report the failure.
 - If the binary launched successfully — report network connections, file/registry artifacts, and persistence behavior from the logs.
 
+**Before launching: verify sandbox infrastructure is installed.**
+
+Check that `C:\sandbox\scripts\run-watchdog.ps1` exists. If it doesn't, tell the user:
+> "The sandbox infrastructure isn't installed yet. Run the canary installer first:
+> `irm https://raw.githubusercontent.com/AppDevOnly/canary/main/install.ps1 | iex`"
+
+**Generate the target's .wsb config from the template:**
+
+```powershell
+# Read template
+$template = Get-Content 'C:\sandbox\scripts\sandbox-template.wsb' -Raw
+
+# Add Sysinternals mapped folder if present on host
+$sysinternals = 'C:\temp\security-tools\Sysinternals'
+if (Test-Path $sysinternals) {
+    $block = @"
+    <MappedFolder>
+      <HostFolder>$sysinternals</HostFolder>
+      <SandboxFolder>C:\tools\Sysinternals</SandboxFolder>
+      <ReadOnly>true</ReadOnly>
+    </MappedFolder>
+"@
+    $template = $template -replace '<!-- SYSINTERNALS_BLOCK -->', $block
+} else {
+    $template = $template -replace '<!-- SYSINTERNALS_BLOCK -->', ''
+}
+
+# Write target-specific .wsb
+$wsbPath = "C:\sandbox\$targetName.wsb"
+$template | Out-File $wsbPath -Encoding UTF8 -Force
+```
+
+**Write `setup.ps1` for this target** (generated fresh — see Phase 4 setup script guidance below), then launch:
+
+```powershell
+powershell -NoExit -File C:\sandbox\scripts\run-watchdog.ps1 -WsbFile $wsbPath
+```
+
+Monitor `C:\sandbox\output\stream.log` in real time. Report progress to the user as it streams.
+
 ```
 → Use the /test-install protocol for full sandbox evaluation
 → See ~/.claude/commands/test-install.md for the complete sandbox procedure
