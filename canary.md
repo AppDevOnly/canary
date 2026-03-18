@@ -42,6 +42,19 @@ Parse `<target>`:
 
 If no target is provided, ask the user what they'd like to evaluate and explain the supported formats.
 
+**After the user chooses Full mode, run a preflight check before touching the target:**
+
+Check all tools needed for Full mode in one pass:
+- `gh auth status` — GitHub CLI authenticated
+- `pip-audit --version` — Python dependency audit
+- `npm --version` — Node dependency audit
+- Windows Sandbox: `Get-WindowsOptionalFeature -Online -FeatureName Containers-DisposableClientVM` (PowerShell)
+- Docker: `docker --version`
+
+If anything is missing, handle all installs now before starting Phase 2. Tell the user: "Before I start, let me make sure you have everything needed for a Full evaluation. I found [X] missing. Let's get those installed now so the scan runs uninterrupted."
+
+For Quick and Medium, only check `gh` — the other tools aren't needed.
+
 **Before starting, tell the user:**
 
 > "Canary v2.3
