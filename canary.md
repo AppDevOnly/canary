@@ -153,6 +153,42 @@ If no target is provided, ask the user what they'd like to evaluate and explain 
 
 If the user wants to proceed: default them to Quick regardless of what they choose, and note the override in the report. Do not offer Medium or Full for repos flagged as offensive tooling.
 
+**VirusTotal binary pre-scan (all tiers, GitHub targets only):**
+
+Before presenting the tier menu, fetch the repo file tree and check for pre-compiled binaries:
+```bash
+gh api repos/{owner}/{repo}/git/trees/HEAD?recursive=1 \
+  --jq '[.tree[] | select(.path | test("\\.(exe|dll|msi|pkg|dmg|deb|rpm|bin|so|dylib)$"; "i")) | {path: .path, sha: .sha}]'
+```
+
+If binaries are found and `VT_API_KEY` is set, scan up to 10 of them via VirusTotal URL scan. Rate limit: pause 15 seconds between submissions (free tier = 4 req/min).
+
+For each binary, submit its raw GitHub URL:
+```powershell
+$rawUrl = "https://raw.githubusercontent.com/{owner}/{repo}/HEAD/$binaryPath"
+$encoded = [uri]::EscapeDataString($rawUrl)
+$submit = Invoke-RestMethod -Uri "https://www.virustotal.com/api/v3/urls" -Method POST `
+    -Headers @{"x-apikey" = $env:VT_API_KEY} `
+    -Body "url=$encoded" -ContentType "application/x-www-form-urlencoded"
+$analysisId = $submit.data.id
+Start-Sleep -Seconds 20
+$result = Invoke-RestMethod -Uri "https://www.virustotal.com/api/v3/analyses/$analysisId" `
+    -Headers @{"x-apikey" = $env:VT_API_KEY}
+$stats = $result.data.attributes.stats
+# stats.malicious, stats.suspicious, stats.undetected, stats.harmless
+```
+
+Report findings immediately — do not wait until Phase 5:
+- `malicious > 0` → **CRITICAL** — flag the specific binary, count of engines detecting it, and stop to warn user before continuing
+- `suspicious > 0` → **HIGH** — flag with count; note it may be a false positive (common for security tools and packers)
+- `malicious = 0, suspicious = 0` → note as "VirusTotal: clean (N engines)"
+- If more than 10 binaries exist: scan the 10 largest by file size, note count of unscanned in report
+
+If `VT_API_KEY` is not set and binaries are found:
+> "This repo contains [N] pre-compiled binaries (.exe, .dll, etc.) that I can't verify. VirusTotal integration isn't configured — I'd strongly recommend setting `VT_API_KEY` to check these against 70+ AV engines before using them. Continuing without binary hash checks."
+
+If no binaries found: skip this step silently.
+
 **Tell the user:**
 
 > "Canary v2.8 — use at your own risk. Canary reduces risk but does not guarantee safety. Use your own judgment before installing any software.
@@ -180,6 +216,21 @@ gh auth status 2>/dev/null && echo "OK" || echo "NOT LOGGED IN"
 If `gh` is missing: offer to install via `winget install GitHub.cli` (Windows) or `brew install gh` (Mac/Linux). Verify before continuing.
 If `gh auth` fails: guide through `gh auth login`. Wait for completion.
 If target is a local path, pip package, or npm package: no tool check needed for Quick.
+
+**VirusTotal API key (optional but strongly recommended):**
+```powershell
+$env:VT_API_KEY
+```
+If not set:
+> "VirusTotal integration isn't configured — I won't be able to check pre-compiled binaries against 70+ AV engines. This is especially important for repos that ship .exe or .dll files.
+>
+> To enable it: sign up free at https://www.virustotal.com, go to your profile → API Key, copy it, then set it with:
+> `$env:VT_API_KEY = 'your-key-here'`
+> Or add it to your PowerShell profile for persistence.
+>
+> Free tier gives 500 lookups/day — plenty for normal canary use. Continue without it?"
+
+If user declines or skips: note "VirusTotal: not configured — binary hash checks skipped" in the report. Continue the scan.
 
 ### Dependency check — Medium
 
@@ -873,6 +924,45 @@ $template | Out-File 'C:\sandbox\scripts\setup.ps1' -Encoding UTF8 -Force
 Write-Host "setup.ps1 generated for $targetName"
 ```
 
+**VirusTotal scan of download URL (Full mode, if VT_API_KEY is set):**
+
+Before launching the sandbox, check the download URL against VirusTotal. This catches trojanized release binaries that pass static analysis clean.
+
+```powershell
+if ($env:VT_API_KEY -and $targetUrl) {
+    Write-Host "Checking download URL against VirusTotal..."
+    $encoded = [uri]::EscapeDataString($targetUrl)
+    $submit = Invoke-RestMethod -Uri "https://www.virustotal.com/api/v3/urls" -Method POST `
+        -Headers @{"x-apikey" = $env:VT_API_KEY} `
+        -Body "url=$encoded" -ContentType "application/x-www-form-urlencoded" `
+        -ErrorAction SilentlyContinue
+    if ($submit.data.id) {
+        $analysisId = $submit.data.id
+        Start-Sleep -Seconds 20
+        $result = Invoke-RestMethod -Uri "https://www.virustotal.com/api/v3/analyses/$analysisId" `
+            -Headers @{"x-apikey" = $env:VT_API_KEY} -ErrorAction SilentlyContinue
+        $stats = $result.data.attributes.stats
+        # stats.malicious, stats.suspicious, stats.undetected, stats.harmless
+        if ($stats.malicious -gt 0) {
+            Write-Host "CRITICAL: VirusTotal flagged download URL — $($stats.malicious) engines detect malicious content"
+        } elseif ($stats.suspicious -gt 0) {
+            Write-Host "HIGH: VirusTotal flagged download URL as suspicious — $($stats.suspicious) engines"
+        } else {
+            Write-Host "VirusTotal: download URL clean ($($stats.undetected + $stats.harmless) engines checked)"
+        }
+    } else {
+        Write-Host "VirusTotal: URL submission failed (API error or rate limit) — proceeding without check"
+    }
+} else {
+    Write-Host "VirusTotal: skipped (VT_API_KEY not set)"
+}
+```
+
+If `malicious > 0`: stop before launching the sandbox and warn the user:
+> "VirusTotal flagged the download URL as malicious ([N] engines). This is a strong signal the release binary has been tampered with or is outright malware. I strongly recommend not running this in the sandbox. Do you want to abort?"
+
+Wait for explicit confirmation before proceeding if flagged malicious.
+
 Then ask the user before launching:
 
 > "Will you be interacting with the sandbox directly (clicking, typing commands), or should I run everything automatically and you just watch this window?"
@@ -1051,6 +1141,23 @@ Fix:
   - Second step if needed
 
 (Repeat for each finding. If no findings: "No issues found.")
+
+
+## VirusTotal
+
+Include this section only if VT_API_KEY was set during the scan. If not configured, write:
+"Not evaluated — set VT_API_KEY to enable binary hash checks against 70+ AV engines."
+
+If configured, report results for each binary scanned:
+  Binary: <filename>
+  Engines checked: <N>
+  Detections: <N malicious, N suspicious> — or "Clean"
+
+If the download URL was scanned (Full mode):
+  Download URL: <url (truncated if long)>
+  Detections: <N malicious, N suspicious> — or "Clean"
+
+If binaries were present but the cap of 10 was hit, note how many were scanned vs total.
 
 
 ## Security Analysis
