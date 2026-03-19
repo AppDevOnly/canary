@@ -43,7 +43,8 @@ $sandboxFiles = @(
     "sandbox/run-watchdog.ps1",
     "sandbox/bootstrap.cmd",
     "sandbox/sandbox-template.wsb",
-    "sandbox/analyze-pid-chain.ps1"
+    "sandbox/analyze-pid-chain.ps1",
+    "sandbox/setup-template.ps1"
 )
 
 $allOk = $true
