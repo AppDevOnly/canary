@@ -783,6 +783,49 @@ Before you use it:
 
 Optional:
   - Nice-to-have improvement
+
+
+## Token Usage
+
+Before writing this section, sum all `usage` fields from this session's JSONL file:
+
+```powershell
+$sessionFile = Get-ChildItem "$env:USERPROFILE\.claude\projects\" -Recurse -Filter '*.jsonl' |
+    Where-Object { $_.Name -notmatch '^agent-' } |
+    Sort-Object LastWriteTime -Descending |
+    Select-Object -First 1 -ExpandProperty FullName
+
+$input = 0; $output = 0; $cacheRead = 0; $cacheCreate = 0
+Get-Content $sessionFile | ForEach-Object {
+    try {
+        $j = $_ | ConvertFrom-Json -ErrorAction Stop
+        if ($j.message.usage) {
+            $u = $j.message.usage
+            $input      += if ($u.input_tokens) { $u.input_tokens } else { 0 }
+            $output     += if ($u.output_tokens) { $u.output_tokens } else { 0 }
+            $cacheRead   += if ($u.cache_read_input_tokens) { $u.cache_read_input_tokens } else { 0 }
+            $cacheCreate += if ($u.cache_creation_input_tokens) { $u.cache_creation_input_tokens } else { 0 }
+        }
+    } catch {}
+}
+# Sonnet 4.5 pricing: $3/M input, $15/M output, $0.30/M cache read, $3.75/M cache write
+$cost = ($input / 1e6 * 3) + ($output / 1e6 * 15) + ($cacheRead / 1e6 * 0.30) + ($cacheCreate / 1e6 * 3.75)
+Write-Host "input=$input output=$output cache_read=$cacheRead cache_create=$cacheCreate cost=$([math]::Round($cost,4))"
+```
+
+Write the section using the values above:
+
+```
+## Token Usage
+
+  Input tokens:         <N>
+  Output tokens:        <N>
+  Cache read tokens:    <N>   (<X>% of input served from cache)
+  Cache write tokens:   <N>
+  Estimated cost:       ~$<N>  (Sonnet 4.6 pricing)
+```
+
+Cache read % = cache_read / (input + cache_read) * 100, rounded to nearest integer.
 ```
 
 After writing the report, delete the state file — the scan is complete:
