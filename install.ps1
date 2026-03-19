@@ -42,7 +42,8 @@ New-Item -ItemType Directory -Force -Path $OutputDir  | Out-Null
 $sandboxFiles = @(
     "sandbox/run-watchdog.ps1",
     "sandbox/bootstrap.cmd",
-    "sandbox/sandbox-template.wsb"
+    "sandbox/sandbox-template.wsb",
+    "sandbox/analyze-pid-chain.ps1"
 )
 
 $allOk = $true
