@@ -1,10 +1,10 @@
 ---
 description: Evaluate code for security issues, dependency vulnerabilities, bugs, and quality problems before installing
-version: 2.4
+version: 2.5
 ---
 
 # /canary
-# canary-version: 2.4
+# canary-version: 2.5
 
 Evaluate code before you trust it. Canary reads source code, checks for security issues, scans for known vulnerabilities, and can run the code in an isolated sandbox — then gives you a plain-English verdict.
 
@@ -23,10 +23,10 @@ Where `<target>` is a GitHub URL, local path, `pip:<package>`, or `npm:<package>
 
 If the user types `update` (or `/canary update`) with no target:
 
-1. Read the local skill file version from the `# /canary` header or the version line in `canary.md`
+1. Read the local skill file version from the `# canary-version:` line
 2. Fetch the remote version:
 ```bash
-gh api repos/AppDevOnly/canary/contents/canary.md --jq '.content' | base64 -d | grep "Canary v"
+gh api repos/AppDevOnly/canary/contents/canary.md --jq '.content' | base64 -d | grep "canary-version"
 ```
 3. Compare. If behind (or if the user just wants a clean reinstall), run:
 ```powershell
@@ -42,38 +42,80 @@ If already up to date, say so and stop — don't reinstall unnecessarily.
 
 **Always use `gh api <endpoint> --jq '<filter>'` for GitHub API calls and JSON parsing.** Do not use standalone `jq`, `python3`, or `python` for JSON parsing — they are not reliably available on Windows. If you need to parse JSON outside of a `gh api` call, use `grep` or string matching instead.
 
-Canary works best with specialized tools installed. Quick and Medium need very little. Full mode needs more — but canary walks the user through every install. No tool is skipped silently.
+### Tools by scan level
 
-### Quick and Medium tools
+Quick needs almost nothing. Medium needs the static analysis toolkit. Full needs everything.
 
-| Tool | Required for | Install command |
-|------|-------------|-----------------|
-| `gh` | All GitHub targets | `winget install GitHub.cli` (Windows) / `brew install gh` (Mac/Linux) |
-| `pip-audit` | Python CVE scanning | `pip install pip-audit` |
-| `npm` | Node CVE scanning | Install Node.js from https://nodejs.org |
-| `semgrep` | Multi-language static analysis | `pip install semgrep` |
-| `bandit` | Python security linting | `pip install bandit` |
-| `trufflehog` | Git history secrets scan | `winget install trufflesecurity.trufflehog` (Windows) / `brew install trufflehog` (Mac) |
-| `gitleaks` | Fast secrets scan | `winget install gitleaks` (Windows) / `brew install gitleaks` (Mac) |
+```
+Tool                  Quick        Medium            Full
+────────────────────  ───────────  ────────────────  ──────────────────
+gh + gh auth login    GitHub only  GitHub only       required
+pip / Python          —            for pip installs  required
+winget (Windows)      —            for some installs required
+semgrep               —            required          required
+bandit                —            Python projects   Python projects
+trufflehog            —            required          required
+gitleaks              —            required          required
+pip-audit             —            Python projects   Python projects
+npm / npm audit       —            Node projects     Node projects
+Admin rights          —            —                 required
+Windows Sandbox       —            —                 required
+Sysinternals Suite    —            —                 required
+tshark / Wireshark    —            —                 required
+Canary sandbox scripts—            —                 required
+Docker                —            —                 fallback (Linux/Mac)
+```
 
-### Full mode tools (sandbox)
+### Install commands
 
-| Tool | Required for | Install |
-|------|-------------|---------|
-| Windows Sandbox | Isolated execution environment | Enable via Optional Features → Windows Sandbox (requires reboot) |
-| Sysinternals Suite | Procmon (process monitor) + Autoruns (persistence baseline) | Download from Microsoft, extract to `C:\temp\security-tools\Sysinternals\` |
-| Wireshark / tshark | Network capture | `winget install WiresharkFoundation.Wireshark` |
-| Docker | Sandbox fallback (Linux/Mac) | `winget install Docker.DockerDesktop` |
+```
+gh:           winget install GitHub.cli            (Windows)
+              brew install gh                       (Mac/Linux)
+semgrep:      pip install semgrep
+bandit:       pip install bandit
+trufflehog:   winget install trufflesecurity.trufflehog  (Windows)
+              brew install trufflehog               (Mac)
+gitleaks:     winget install gitleaks              (Windows)
+              brew install gitleaks                 (Mac)
+pip-audit:    pip install pip-audit
+npm:          Install Node.js from https://nodejs.org
+tshark:       winget install WiresharkFoundation.Wireshark
+Sysinternals: Download suite from https://learn.microsoft.com/sysinternals/downloads/sysinternals-suite
+              Extract to C:\temp\security-tools\Sysinternals\
+Windows Sandbox: Enable-WindowsOptionalFeature -Online -FeatureName Containers-DisposableClientVM
+              (requires reboot)
+Docker:       winget install Docker.DockerDesktop
+```
 
 ### Tool install behavior
 
-Full mode requires participation from the user — several tools need to be installed on their machine before the scan can run. This is expected and normal. When a tool is missing:
+No tool is ever skipped silently. When a tool is missing, tell the user exactly what it is, what it's needed for, and offer to install it. If the user declines, note it as a limitation in the report. Never proceed assuming a tool is there when you haven't checked.
 
-Tell the user: "Full mode uses several specialized tools to give you a complete picture. Some of these may not be installed yet — I'll check right now and walk you through anything that's missing. Each install takes about a minute and I'll handle it step by step. Once everything's ready I'll run the scan without interrupting you again."
+---
 
-Then for each missing tool: "I need [tool] to [do X]. Want me to walk you through installing it? It'll take about [time]. Once it's installed I'll pick up right where we left off."
+## Phase 0 — Resume check
 
-Install, verify, and continue. Never skip a tool silently — note it as a limitation in the report if the user declines.
+Before doing anything else, check for an existing partial scan of this target.
+
+Derive a target slug from the target string:
+- `https://github.com/foo/bar` → `github-foo-bar`
+- `/path/to/project` → last folder name, e.g. `local-project`
+- `pip:requests` → `pip-requests`
+- `npm:lodash` → `npm-lodash`
+
+Check for a state file:
+```powershell
+$stateFile = "$HOME\canary-reports\$targetSlug-state.json"
+Test-Path $stateFile
+```
+
+If a state file exists, read it and tell the user:
+> "I found a partial [level] scan of [target] from [date]. Here's what's already complete: [list phases done]. Want to resume from where we left off, or start fresh?"
+
+- **Resume** — load existing findings from state file, skip completed phases, continue from next incomplete phase
+- **Fresh** — delete state file, start over from Phase 1
+
+If no state file exists, proceed normally.
 
 ---
 
@@ -87,9 +129,130 @@ Parse `<target>`:
 
 If no target is provided, ask the user what they'd like to evaluate and explain the supported formats.
 
-**After the user chooses a tier, present a single consent summary before doing anything else:**
+**Tell the user:**
 
-Tailor the consent block to the chosen tier. Use this exact template:
+> "Canary v2.5
+>
+> Everything I do during this evaluation is [Claude] — I'm fetching and reading code on your behalf using the GitHub API and other tools. I won't run anything from this software on your machine unless you choose Full mode, in which case those actions will be clearly labeled [software under test] and I'll confirm with you before running anything."
+
+Then ask:
+
+> "How thorough should I be?
+>
+> - **Quick** — I'll read the most important files (entry points, install scripts, anything that runs at startup) and look for red flags using my own analysis. No external tools needed. Takes about a minute.
+> - **Medium** — I'll read the full codebase, run specialized scanning tools (semgrep, bandit, trufflehog, gitleaks), check all dependencies for known security vulnerabilities, and assess code quality. Takes a few minutes.
+> - **Full** — Everything in Medium, plus I'll run it in an isolated sandbox and watch what it actually does (network connections, files touched, whether it tries to persist). Requires Windows Sandbox, Wireshark, and Sysinternals. If any of these aren't installed, I'll walk you through it."
+
+**After the user chooses a tier, run dependency checks before doing anything else:**
+
+### Dependency check — Quick
+
+If the target is a GitHub URL:
+```bash
+gh --version 2>/dev/null && echo "OK" || echo "MISSING"
+gh auth status 2>/dev/null && echo "OK" || echo "NOT LOGGED IN"
+```
+
+If `gh` is missing: offer to install via `winget install GitHub.cli` (Windows) or `brew install gh` (Mac/Linux). Verify before continuing.
+If `gh auth` fails: guide through `gh auth login`. Wait for completion.
+If target is a local path, pip package, or npm package: no tool check needed for Quick.
+
+### Dependency check — Medium
+
+Run all Quick checks first, then:
+
+Check pip/Python (needed to install pip-based tools):
+```bash
+pip --version 2>/dev/null || pip3 --version 2>/dev/null || python -m pip --version 2>/dev/null
+```
+
+Check winget (Windows, needed for winget-based installs):
+```powershell
+winget --version 2>$null
+```
+
+Check all static analysis tools:
+```bash
+semgrep --version 2>/dev/null && echo "semgrep: OK" || echo "semgrep: MISSING"
+bandit --version 2>/dev/null && echo "bandit: OK" || echo "bandit: MISSING"
+trufflehog --version 2>/dev/null && echo "trufflehog: OK" || echo "trufflehog: MISSING"
+gitleaks version 2>/dev/null && echo "gitleaks: OK" || echo "gitleaks: MISSING"
+pip-audit --version 2>/dev/null && echo "pip-audit: OK" || echo "pip-audit: MISSING"
+npm --version 2>/dev/null && echo "npm: OK" || echo "npm: MISSING"
+```
+
+Show a clean summary to the user before asking to install anything:
+
+> "Here's what I found on your machine:
+> ✅ semgrep
+> ✅ bandit
+> ⬜ trufflehog — not installed
+> ⬜ gitleaks — not installed
+> ✅ pip-audit
+> ✅ npm
+>
+> I need to install trufflehog and gitleaks before I can start. Want me to do that now? It'll take about a minute each and I'll confirm each one works before moving on."
+
+Install missing tools one at a time. Confirm each works before moving to the next.
+
+If pip/Python is not available and a pip-based tool is missing:
+> "I need Python/pip installed to set up [tool]. Is Python installed on your machine? If it is, try opening a new terminal and running `pip --version`. If Python isn't installed yet, I can walk you through installing it first."
+
+If winget is not available and a winget-based tool is missing:
+> "winget isn't available on this machine. I can walk you through installing [tool] manually — want me to do that?"
+
+If the user declines any tool: note it as a limitation. Never skip silently — always record what was skipped and why.
+
+### Dependency check — Full
+
+Run all Medium checks first, then:
+
+Check admin rights (required for Procmon, tshark, SAC registry):
+```powershell
+([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+```
+If not admin:
+> "Full mode needs administrator rights to run Procmon, tshark, and modify system settings. Please restart Claude Code as Administrator (right-click → Run as administrator) and try again."
+Stop here — do not proceed without admin rights.
+
+Check Windows Sandbox:
+```powershell
+(Get-WindowsOptionalFeature -Online -FeatureName Containers-DisposableClientVM -ErrorAction SilentlyContinue).State
+```
+If not Enabled:
+> "Windows Sandbox isn't enabled on this machine. I can enable it for you — it requires a reboot after. Want me to do that now?"
+```powershell
+Enable-WindowsOptionalFeature -Online -FeatureName Containers-DisposableClientVM
+```
+After reboot, re-run the installer and continue.
+
+Check Sysinternals:
+```powershell
+Test-Path 'C:\temp\security-tools\Sysinternals\Procmon64.exe'
+Test-Path 'C:\temp\security-tools\Sysinternals\autorunsc64.exe'
+```
+If missing:
+> "Sysinternals isn't installed at the expected path. Download the Sysinternals Suite from https://learn.microsoft.com/sysinternals/downloads/sysinternals-suite and extract it to `C:\temp\security-tools\Sysinternals\`. Let me know when that's done and I'll continue."
+
+Check tshark:
+```bash
+tshark --version 2>/dev/null && echo "OK" || echo "MISSING"
+```
+If missing: offer `winget install WiresharkFoundation.Wireshark`. Verify after.
+
+Check sandbox scripts:
+```powershell
+Test-Path 'C:\sandbox\scripts\run-watchdog.ps1'
+```
+If missing:
+> "The canary sandbox infrastructure isn't installed yet. Running the installer now..."
+```powershell
+irm https://raw.githubusercontent.com/AppDevOnly/canary/main/install.ps1 | iex
+```
+
+**Do not present the consent block until all required tools are confirmed present or the user has explicitly declined specific ones.**
+
+**After all checks pass, present the consent block tailored to the chosen tier:**
 
 > "Here's everything I'll do during this [Quick / Medium / Full] evaluation — I'll ask once and then run without interruptions.
 >
@@ -99,9 +262,8 @@ Tailor the consent block to the chosen tier. Use this exact template:
 > - Search for secrets, hardcoded credentials, and suspicious patterns in the code
 > *(Medium + Full only)* Run `semgrep`, `bandit`, `trufflehog`, and `gitleaks` on your machine for deeper static analysis
 > *(Medium + Full only)* Run `pip-audit` and/or `npm audit` to check dependencies for known CVEs
-> *(Medium + Full only)* Check tool availability — walk you through any missing installs before starting
 > - Write a report to `~/canary-reports/`
-> - Save a note to memory so future sessions know this eval is done
+> - Save scan progress after each step so you can resume if anything interrupts
 >
 > *(Full only)* **[software under test] — this is the code running on your machine:**
 > - Download the target release binary to a temporary folder
@@ -111,52 +273,32 @@ Tailor the consent block to the chosen tier. Use this exact template:
 >
 > Ready to proceed?"
 
-Wait for a yes before starting. Do not ask for permission again during the evaluation unless a genuinely unexpected action comes up that wasn't listed above.
+Wait for a yes before starting. Do not ask for permission again during the evaluation unless a genuinely unexpected action comes up.
 
-**After the user chooses Full mode, run a preflight check before touching the target:**
+**After consent, initialize scan state:**
 
-Tell the user upfront: "Full mode uses several specialized tools to give you a complete picture. Some of these may not be installed yet — I'll check right now and walk you through anything that's missing. Each install takes about a minute and I'll handle it step by step. Once everything's ready I'll run the scan without interrupting you again."
-
-Check all tools in one pass:
-```bash
-gh auth status
-pip-audit --version
-npm --version
-semgrep --version
-bandit --version
-trufflehog --version
-gitleaks version
-tshark --version
-```
-```powershell
-Get-WindowsOptionalFeature -Online -FeatureName Containers-DisposableClientVM
-Test-Path 'C:\temp\security-tools\Sysinternals\Procmon64.exe'
-Test-Path 'C:\temp\security-tools\Sysinternals\Autoruns64.exe'
+Write a state file to track progress:
+```json
+{
+  "target": "<url or path>",
+  "target_slug": "<slug>",
+  "date": "<YYYY-MM-DD>",
+  "level": "<Quick|Medium|Full>",
+  "phases_complete": [],
+  "findings_count": 0,
+  "sac_original_state": null
+}
 ```
 
-Handle all missing tools now, before Phase 2. Walk through each install one at a time — confirm it works before moving to the next.
-
-For Quick and Medium, only check `gh`, `pip-audit`, `npm`, `semgrep`, `bandit`, `trufflehog`, and `gitleaks` — sandbox tools aren't needed.
-
-**Before starting, tell the user:**
-
-> "Canary v2.4
->
-> Everything I do during this evaluation is [Claude] — I'm fetching and reading code on your behalf using the GitHub API and other tools. I won't run anything from this software on your machine unless you choose Full mode, in which case those actions will be clearly labeled [software under test] and I'll confirm with you before running anything."
-
-Then ask:
-
-> "How thorough should I be?
->
-> - **Quick** — I'll scan the most important files (entry points, install scripts, anything that runs at startup) for red flags. Takes about a minute.
-> - **Medium** — I'll read the full codebase, check all dependencies for known security vulnerabilities, scan for accidentally committed secrets, and assess code quality. Takes a few minutes.
-> - **Full** — Everything in Medium, plus I'll run it in an isolated sandbox and watch what it actually does on your machine (what network connections it makes, what files it touches, whether it tries to persist anything). Takes longer and requires Windows Sandbox, Wireshark, and Sysinternals. If any of these aren't installed, I'll walk you through it — each takes about a minute."
+Write to `~/canary-reports/<target-slug>-state.json`. Update this file after each phase completes by adding the phase name to `phases_complete`. This is how resume works after a restart.
 
 ---
 
 ## Phase 2 — Static security analysis
 
 ### 2a. Code inspection
+
+**Progress:** Tell the user "Reading source files..." before starting. When done: "Source review complete — [N findings / no issues found]."
 
 **Quick and above:** Read these files first (in order of risk):
 1. Entry points: `__main__.py`, `main.py`, `index.js`, `cli.py`, `app.py`
@@ -178,20 +320,28 @@ Flag these patterns (rate each CRITICAL / HIGH / MEDIUM / LOW / INFO):
 - `install_requires` with no version pins — **MEDIUM** (unpinned deps allow supply chain attacks)
 - `__import__` / dynamic imports — **MEDIUM** (can obfuscate what's loaded)
 
+Save state after 2a completes.
+
 ### 2b. Semgrep static analysis
 
 **Medium and above only.**
+
+**Progress:** "Running semgrep static analysis — this may take 30-60 seconds..." Every 30 seconds if still running: "Semgrep still running... [elapsed]s elapsed." When done: "Semgrep complete — [N findings / no findings]."
 
 If semgrep is available, run against the local clone or downloaded source:
 ```bash
 semgrep --config=auto --json 2>/dev/null | grep -i "severity\|message\|path\|line"
 ```
 
-Focus on HIGH and CRITICAL findings. Skip INFO-level noise. If semgrep isn't available, note it in the report and rely on manual code inspection.
+Focus on HIGH and CRITICAL findings. Skip INFO-level noise. If semgrep isn't available (user declined install), note it in the report and rely on manual code inspection.
+
+Save state after 2b completes.
 
 ### 2c. Bandit (Python projects only)
 
 **Medium and above only.**
+
+**Progress:** "Running bandit Python security scan..." When done: "Bandit complete — [N findings / no findings]."
 
 If the project is Python and bandit is available:
 ```bash
@@ -200,9 +350,13 @@ bandit -r . -f json 2>/dev/null | grep -i "issue_severity\|issue_text\|filename\
 
 Flag HIGH and MEDIUM severity findings. Cross-reference with manual code inspection — bandit has false positives.
 
+Save state after 2c completes.
+
 ### 2d. Secrets scan
 
 **Medium and above only.**
+
+**Progress:** "Scanning git history for secrets..." When done: "Secrets scan complete — [N secrets found / no secrets found]."
 
 If trufflehog is available, scan git history for secrets (catches things committed then deleted):
 ```bash
@@ -222,9 +376,13 @@ If neither is available, manually search for patterns:
 
 Report any matches with file + line number. Rate HIGH if found in committed source. Do NOT print the full value — show first 8 chars + `...`
 
+Save state after 2d completes.
+
 ### 2e. Dependency audit
 
 **Medium and above only.**
+
+**Progress:** "Checking dependencies for known CVEs..." When done: "Dependency audit complete — [N vulnerabilities found / no CVEs found]."
 
 **Python projects** — check `requirements.txt`, `pyproject.toml`, `setup.py`:
 ```bash
@@ -240,20 +398,28 @@ If audit tools aren't available, manually check top-level dependencies and flag 
 - More than 2 major versions behind latest
 - Known to have had critical CVEs (e.g. `log4j`, `lodash < 4.17.21`, `requests < 2.20.0`)
 
+Save state after 2e completes.
+
 ### 2f. License compliance
 
 **Medium and above only.**
+
+**Progress:** "Checking license compliance..." When done: "License check complete."
 
 Summarize licenses used by direct dependencies. Flag:
 - GPL/AGPL in commercial contexts — MEDIUM (may require source disclosure)
 - Unknown/unlicensed packages — HIGH (legal risk)
 - License mismatches (project claims MIT but depends on GPL)
 
+Save state after 2f completes.
+
 ---
 
 ## Phase 3 — Code quality assessment
 
 **Medium and above only.**
+
+**Progress:** "Analyzing code quality..." When done: "Code quality assessment complete — [N findings]."
 
 Rate each finding CRITICAL / HIGH / MEDIUM / LOW / INFO.
 
@@ -273,6 +439,8 @@ Rate each finding CRITICAL / HIGH / MEDIUM / LOW / INFO.
 - System tools assumed present (Docker, pdflatex, ffmpeg, etc.) without install instructions
 - Environment variables read without defaults or documentation
 
+Save state after Phase 3 completes.
+
 ---
 
 ## Phase 4 — Dynamic sandbox (full mode only)
@@ -288,6 +456,7 @@ If Windows Sandbox is available:
 ```powershell
 $autorunsExe = 'C:\temp\security-tools\Sysinternals\autorunsc64.exe'
 if (Test-Path $autorunsExe) {
+    Write-Host "Taking Autoruns baseline snapshot..."
     & $autorunsExe /accepteula '-a' '*' -c -h -s -nobanner -o 'C:\sandbox\output\autoruns-before.csv' '*'
     Write-Host "Autoruns baseline saved."
 }
@@ -296,6 +465,7 @@ if (Test-Path $autorunsExe) {
 After the sandbox run, take a second snapshot and diff:
 
 ```powershell
+Write-Host "Taking Autoruns after-snapshot..."
 & $autorunsExe /accepteula '-a' '*' -c -h -s -nobanner -o 'C:\sandbox\output\autoruns-after.csv' '*'
 
 # Show new entries (persistence attempts)
@@ -346,7 +516,7 @@ $check = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\CI\Policy').V
 Write-Host "SAC state now: $check (0 = Off)"
 ```
 
-Record the original SAC state so you can restore it after the scan. All sandbox launch commands must be run in a **new** PowerShell process (via `Start-Process powershell`) so the policy change is in effect — not in the same session that changed the registry.
+Record `$sacState` in the state file so it can be restored even if the session is interrupted. All sandbox launch commands must be run in a **new** PowerShell process (via `Start-Process powershell`) so the policy change is in effect.
 
 After the sandbox run completes (success or failure), **always re-enable SAC** if it was active before:
 
@@ -358,7 +528,7 @@ Write-Host "Smart App Control restored to original state ($sacState)."
 
 Then tell the user:
 
-> "Smart App Control has been re-enabled. To verify: open Windows Security > App & browser control > Smart App Control — it should show its previous setting. If you want to confirm via PowerShell: `(Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\CI\Policy').VerifiedAndReputablePolicyState` should return $sacState."
+> "Smart App Control has been re-enabled. To verify: open Windows Security > App & browser control > Smart App Control. Or run: `(Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\CI\Policy').VerifiedAndReputablePolicyState` — it should return $sacState."
 
 Before launching, warn the user:
 
@@ -368,6 +538,60 @@ Before launching, warn the user:
 > - **You don't need to interact with any of those windows.** Just keep an eye on this Claude window — I'll report everything I observe here as it happens.
 > - When the evaluation is done, the sandbox will close automatically and I'll write the report.
 > - **If anything looks wrong or gets stuck, just tell me in plain English** — describe what you're seeing and I'll figure out what to do. You don't need to know any commands."
+
+**Before launching: verify sandbox infrastructure is installed.**
+
+Check that `C:\sandbox\scripts\run-watchdog.ps1` exists. If it doesn't, tell the user:
+> "The sandbox infrastructure isn't installed yet. Run the canary installer first:
+> `irm https://raw.githubusercontent.com/AppDevOnly/canary/main/install.ps1 | iex`"
+
+**Generate the target's .wsb config from the template:**
+
+```powershell
+# Read template
+$template = Get-Content 'C:\sandbox\scripts\sandbox-template.wsb' -Raw
+
+# Add Sysinternals mapped folder if present on host
+$sysinternals = 'C:\temp\security-tools\Sysinternals'
+if (Test-Path $sysinternals) {
+    $block = @"
+    <MappedFolder>
+      <HostFolder>$sysinternals</HostFolder>
+      <SandboxFolder>C:\tools\Sysinternals</SandboxFolder>
+      <ReadOnly>true</ReadOnly>
+    </MappedFolder>
+"@
+    $template = $template -replace '<!-- SYSINTERNALS_BLOCK -->', $block
+} else {
+    $template = $template -replace '<!-- SYSINTERNALS_BLOCK -->', ''
+}
+
+# Write target-specific .wsb
+$wsbPath = "C:\sandbox\$targetName.wsb"
+$template | Out-File $wsbPath -Encoding UTF8 -Force
+```
+
+**Write `setup.ps1` for this target** (generated fresh per target), then ask the user before launching:
+
+> "Will you be interacting with the sandbox directly (clicking, typing commands), or should I run everything automatically and you just watch this window?"
+
+- **Automated** (default) — stall timeout **90 seconds**. If the binary hasn't produced any log output in 90 seconds, the watchdog restarts automatically.
+- **Interactive** — stall timeout **600 seconds** (10 minutes). Gives you time to interact with the software without the watchdog killing it.
+
+```powershell
+# Automated (default) — new process so SAC policy change is in effect
+Start-Process powershell -ArgumentList "-NoExit -ExecutionPolicy Bypass -File C:\sandbox\scripts\run-watchdog.ps1 -WsbFile `"$wsbPath`" -StallTimeoutSec 90 -MaxRetries 2" -WindowStyle Normal
+
+# Interactive
+Start-Process powershell -ArgumentList "-NoExit -ExecutionPolicy Bypass -File C:\sandbox\scripts\run-watchdog.ps1 -WsbFile `"$wsbPath`" -StallTimeoutSec 600 -MaxRetries 2" -WindowStyle Normal
+```
+
+**While monitoring `C:\sandbox\output\stream.log`, give the user a heartbeat every 30 seconds:**
+> "Still running — [elapsed]s. You'll see output here as it comes in. Nothing to do — just keep an eye on this window."
+
+**When stream.log shows a retry attempt:**
+Tell the user immediately:
+> "The sandbox stopped responding — restarting automatically. Attempt [N] of 2. Everything we've found so far is saved."
 
 **After the sandbox run, read `stream.log` and `setup.log` to determine outcome:**
 
@@ -414,54 +638,7 @@ Flag unexpected chains as HIGH. Include the full ancestry in the report: `target
 
 Take the Autoruns diff after the sandbox closes and flag any new persistence entries as HIGH.
 
-**Before launching: verify sandbox infrastructure is installed.**
-
-Check that `C:\sandbox\scripts\run-watchdog.ps1` exists. If it doesn't, tell the user:
-> "The sandbox infrastructure isn't installed yet. Run the canary installer first:
-> `irm https://raw.githubusercontent.com/AppDevOnly/canary/main/install.ps1 | iex`"
-
-**Generate the target's .wsb config from the template:**
-
-```powershell
-# Read template
-$template = Get-Content 'C:\sandbox\scripts\sandbox-template.wsb' -Raw
-
-# Add Sysinternals mapped folder if present on host
-$sysinternals = 'C:\temp\security-tools\Sysinternals'
-if (Test-Path $sysinternals) {
-    $block = @"
-    <MappedFolder>
-      <HostFolder>$sysinternals</HostFolder>
-      <SandboxFolder>C:\tools\Sysinternals</SandboxFolder>
-      <ReadOnly>true</ReadOnly>
-    </MappedFolder>
-"@
-    $template = $template -replace '<!-- SYSINTERNALS_BLOCK -->', $block
-} else {
-    $template = $template -replace '<!-- SYSINTERNALS_BLOCK -->', ''
-}
-
-# Write target-specific .wsb
-$wsbPath = "C:\sandbox\$targetName.wsb"
-$template | Out-File $wsbPath -Encoding UTF8 -Force
-```
-
-**Write `setup.ps1` for this target** (generated fresh per target), then ask the user before launching:
-
-> "Will you be interacting with the sandbox directly (clicking, typing commands), or should I run everything automatically and you just watch this window?"
-
-- **Automated** (default) — stall timeout 300s. Watchdog detects hangs quickly and retries.
-- **Interactive** — use `-StallTimeoutSec 3600`. Prevents watchdog from killing the sandbox while the user is reading output or typing between commands.
-
-```powershell
-# Automated (default) — new process so SAC policy change is in effect
-Start-Process powershell -ArgumentList "-NoExit -ExecutionPolicy Bypass -File C:\sandbox\scripts\run-watchdog.ps1 -WsbFile `"$wsbPath`"" -WindowStyle Normal
-
-# Interactive
-Start-Process powershell -ArgumentList "-NoExit -ExecutionPolicy Bypass -File C:\sandbox\scripts\run-watchdog.ps1 -WsbFile `"$wsbPath`" -StallTimeoutSec 3600" -WindowStyle Normal
-```
-
-Monitor `C:\sandbox\output\stream.log` in real time. Report progress to the user as it streams.
+Save state after Phase 4 completes (record `sac_original_state` in state file).
 
 If Docker is available (cross-platform fallback):
 ```bash
@@ -477,6 +654,8 @@ Note: Docker provides filesystem isolation but limited network/process monitorin
 
 ## Phase 5 — Write the report
 
+**Progress:** "Writing report..."
+
 Write the report to `~/canary-reports/<target-name>-<date>-canary-report.md`
 
 Format for plain-text readability — no markdown tables, no `---` dividers, no heavy bold syntax. The report must look clean when viewed as raw text in an editor, not just when rendered.
@@ -487,7 +666,7 @@ Format for plain-text readability — no markdown tables, no `---` dividers, no 
 Date: <date>
 Target: <url or path>
 Evaluation: <Quick / Medium / Full> — Static Analysis
-Tool: Canary v2.4
+Tool: Canary v2.5
 
 
 ## Verdict: ✅ Safe / ⚠️ Caution / ❌ Unsafe
@@ -585,7 +764,12 @@ Optional:
   - Nice-to-have improvement
 ```
 
-After writing the report, ask the user: "Want me to save a note so future sessions know this evaluation is done?"
+After writing the report, delete the state file — the scan is complete:
+```powershell
+Remove-Item "$HOME\canary-reports\$targetSlug-state.json" -ErrorAction SilentlyContinue
+```
+
+Then ask the user: "Want me to save a note so future sessions know this evaluation is done?"
 
 ---
 
@@ -596,6 +780,7 @@ At any point during the evaluation, the user can describe a problem in plain Eng
 - "the sandbox window closed early" → diagnose and offer to re-run
 - "it's been sitting here for 5 minutes" → check what's stuck and recover
 - "I see an error that says X" → interpret and fix
+- "I restarted my PC / closed Claude" → check for state file and offer to resume
 
 Never require the user to run commands themselves to diagnose an issue. If something is wrong, canary figures it out and handles it.
 
@@ -606,9 +791,11 @@ Never require the user to run commands themselves to diagnose an issue. If somet
 - **Verdict at the top** — ✅ / ⚠️ / ❌ — users need to see this immediately
 - **Plain English** — explain what each finding means and why it matters, as if the user has no security background
 - **Actionable** — every finding includes a suggested fix or workaround
-- **Honest about limits** — note if a check wasn't possible (e.g. tool not installed, private repo)
+- **Honest about limits** — note if a check wasn't possible (e.g. tool not installed, private repo, tool declined)
 - **Rate every finding:** CRITICAL / HIGH / MEDIUM / LOW / INFO
 - **No unsolicited comparisons** — don't compare to other reports unless the user asks
+- **No silent failures** — every tool check and phase transition reported explicitly
+- **Consistent feedback** — user should never see a blank screen; always know what's happening
 
 ---
 
@@ -616,13 +803,15 @@ Never require the user to run commands themselves to diagnose an issue. If somet
 
 **No target provided:** Ask what they'd like to evaluate and show supported formats. Don't error.
 
-**Resuming a paused evaluation:** If memory indicates an evaluation was paused waiting for tier selection, re-present the exact tier prompt from Phase 1 (Quick / Medium / Full with the canonical descriptions). Do not paraphrase or invent alternate tier names.
+**Resuming a paused evaluation:** Check for state file first (Phase 0). If found, offer to resume. If the state file has `sac_original_state` set to a non-zero value, re-enable SAC immediately before doing anything else — it may have been left disabled by the interrupted scan.
 
 **Private repo / access failure:** Tell the user clearly: "I wasn't able to access this repo — it may be private or the URL may be incorrect. If it's private, make sure you're logged in with `gh auth login`."
 
 **Monorepo / multi-package repo:** List the packages/apps found and ask which one(s) to evaluate, or offer to evaluate all of them.
 
 **Target looks hostile during static analysis:** If CRITICAL findings appear before Phase 4, warn the user: "I've already found serious issues in the static analysis. Do you still want me to run this in a sandbox, or is the static report enough?" Don't proceed to sandbox automatically.
+
+**Tool install fails:** If a tool fails to install after attempting, tell the user exactly what went wrong, note it as a limitation, and continue without it. Never silently skip.
 
 ---
 
@@ -635,5 +824,6 @@ Never require the user to run commands themselves to diagnose an issue. If somet
 - If a secret is found, do NOT print the full value — show first 8 chars + `...`
 - Never screenshot the VM terminal — stream logs in real time via `stream.log`; screenshots miss timing and can't be automated
 - Only one sandbox instance at a time — check `Get-Process WindowsSandboxServer` before launch; the watchdog's PID guard handles this automatically but confirm on first run
-- Never put config files in the output folder — the output folder is read-write for the sandbox, so a malicious target could modify its own config (e.g. re-enable disabled features). Keep config in a separate read-only mapped folder
+- Never put config files in the output folder — the output folder is read-write for the sandbox, so a malicious target could modify its own config. Keep config in a separate read-only mapped folder
 - Procmon filenames are timestamped — avoids overwrite prompts on retry; setup.ps1 must use `$ts = Get-Date -Format 'yyyyMMdd-HHmmss'` in the Procmon filename
+- On any interrupted Full scan: check state file for `sac_original_state` and restore SAC before doing anything else
