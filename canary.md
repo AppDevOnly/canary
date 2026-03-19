@@ -217,14 +217,45 @@ If missing:
 irm https://raw.githubusercontent.com/AppDevOnly/canary/main/install.ps1 | iex
 ```
 
-**Check static analysis tools** (these will run inside the sandbox, but we verify they're installed on the host so they can be copied in):
+**Check runtime prerequisites first** — Python and Node must exist before pip/npm tool installs can work:
+```bash
+python --version 2>/dev/null || python3 --version 2>/dev/null && echo "Python: OK" || echo "Python: MISSING"
+node --version 2>/dev/null && echo "Node: OK" || echo "Node: MISSING"
+```
+If Python is missing:
+> "Python is required to install semgrep, bandit, and pip-audit. Install it from https://www.python.org/downloads/ (Windows) or `brew install python` (Mac). Let me know when it's done."
+Stop here — do not attempt pip installs without Python.
+
+If Node/npm is missing and the target has a `package.json`: note it as a limitation — npm audit will be skipped. Don't block the scan; note it in the report.
+
+**Check pip version** — old pip can fail silently:
+```bash
+pip --version 2>/dev/null
+```
+If pip is available but older than 21.x: suggest `python -m pip install --upgrade pip` before installing other tools.
+
+**Check static analysis tools** (these will run inside the sandbox, but we verify they're installed on the host so they can be mapped in):
 
 Check trufflehog version specifically — must be v3.x:
 ```bash
 trufflehog --version 2>/dev/null
 ```
-If missing or showing v2.x:
-> "trufflehog needs to be v3.x. Download the release binary from https://github.com/trufflesecurity/trufflehog/releases (do NOT use winget or pip — they install the wrong version). Let me know when it's installed."
+
+- If **missing**: guide the user through the binary install:
+  > "trufflehog needs to be installed from the GitHub releases page — do NOT use winget or pip, they both install the wrong version.
+  >
+  > 1. Go to https://github.com/trufflesecurity/trufflehog/releases/latest
+  > 2. Download `trufflehog_X.X.X_windows_amd64.tar.gz`
+  > 3. Extract it — you'll get `trufflehog.exe`
+  > 4. Move it somewhere on your PATH, e.g. `C:\tools\trufflehog\trufflehog.exe`
+  > 5. Add `C:\tools\trufflehog` to your PATH if it isn't already, or run it by full path
+  >
+  > Let me know when it's done and I'll verify the version."
+
+  After user confirms: run `trufflehog --version` again and confirm it shows `3.x`.
+
+- If **showing v2.x** (legacy pip install):
+  > "You have trufflehog v2.x installed — that's the old pip version with a different CLI. Canary needs v3.x. Uninstall the old one with `pip uninstall trufflehog`, then follow the binary install steps above."
 
 Check other tools:
 ```bash
@@ -237,16 +268,9 @@ npm --version 2>/dev/null && echo "npm: OK" || echo "npm: MISSING"
 
 **After installing any tool, verify it's callable** — don't trust that install succeeded just because the installer returned 0:
 ```bash
-# Example for semgrep
 semgrep --version 2>/dev/null && echo "CALLABLE" || echo "NOT ON PATH"
 ```
 If a tool installs but isn't callable: warn the user that pip --user installs on Windows often aren't on PATH. Suggest adding the Python Scripts folder to PATH or using the full path as fallback.
-
-**Check pip version** — old pip can fail silently:
-```bash
-pip --version 2>/dev/null
-```
-If pip is available but older than 21.x: suggest `python -m pip install --upgrade pip` before installing other tools.
 
 Show a clean summary to the user before asking to install anything:
 
