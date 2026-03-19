@@ -1,10 +1,10 @@
 ---
 description: Evaluate code for security issues, dependency vulnerabilities, bugs, and quality problems before installing
-version: 2.5
+version: 2.6
 ---
 
 # /canary
-# canary-version: 2.5
+# canary-version: 2.6
 
 Evaluate code before you trust it. Canary reads source code, checks for security issues, scans for known vulnerabilities, and can run the code in an isolated sandbox — then gives you a plain-English verdict.
 
@@ -50,21 +50,26 @@ Quick needs almost nothing. Medium needs the static analysis toolkit. Full needs
 Tool                  Quick        Medium            Full
 ────────────────────  ───────────  ────────────────  ──────────────────
 gh + gh auth login    GitHub only  GitHub only       required
-pip / Python          —            for pip installs  required
-winget (Windows)      —            for some installs required
-semgrep               —            required          required
-bandit                —            Python projects   Python projects
-trufflehog            —            required          required
-gitleaks              —            required          required
-pip-audit             —            Python projects   Python projects
-npm / npm audit       —            Node projects     Node projects
+pip / Python          —            inside sandbox    required
+winget (Windows)      —            —                 required
+semgrep               —            inside sandbox    inside sandbox
+bandit                —            Python (sandbox)  Python (sandbox)
+trufflehog            —            inside sandbox    inside sandbox
+gitleaks              —            inside sandbox    inside sandbox
+pip-audit             —            Python (sandbox)  Python (sandbox)
+npm / npm audit       —            Node (sandbox)    Node (sandbox)
 Admin rights          —            —                 required
-Windows Sandbox       —            —                 required
+Windows Sandbox       —            required          required
 Sysinternals Suite    —            —                 required
 tshark / Wireshark    —            —                 required
-Canary sandbox scripts—            —                 required
+Canary sandbox scripts—            required          required
 Docker                —            —                 fallback (Linux/Mac)
 ```
+
+**Architecture note:** No scan tier ever clones or writes target code to the host machine.
+- **Quick** — GitHub API only. Nothing touches your disk.
+- **Medium** — Static analysis tools run inside Windows Sandbox. Only Claude's interpreted summary leaves the sandbox; raw tool output stays inside.
+- **Full** — Same as Medium, plus the target binary runs inside the sandbox.
 
 ### Install commands
 
@@ -73,8 +78,11 @@ gh:           winget install GitHub.cli            (Windows)
               brew install gh                       (Mac/Linux)
 semgrep:      pip install semgrep
 bandit:       pip install bandit
-trufflehog:   winget install trufflesecurity.trufflehog  (Windows)
-              brew install trufflehog               (Mac)
+trufflehog:   Download the v3 release binary from https://github.com/trufflesecurity/trufflehog/releases
+              (do NOT use winget — the ID is wrong and falls back to pip which installs legacy v2.2.1)
+              (do NOT use pip — pip installs v2.x; canary requires v3.x CLI syntax)
+              Verify: trufflehog --version should show 3.x
+              Mac/Linux: brew install trufflehog
 gitleaks:     winget install gitleaks              (Windows)
               brew install gitleaks                 (Mac)
 pip-audit:    pip install pip-audit
@@ -129,19 +137,30 @@ Parse `<target>`:
 
 If no target is provided, ask the user what they'd like to evaluate and explain the supported formats.
 
+**Offensive repo check:** Before presenting tier options, check the repo name and description for offensive security indicators: keywords such as `0day`, `exploit`, `poc`, `payload`, `shellcode`, `RAT`, `C2`, `backdoor`, `EXP`, `CVE` in the repo name, or descriptions mentioning "exploit collection", "proof of concept", or "offensive". If found:
+
+> "Heads up — this repo appears to be offensive security tooling (exploit code, POCs, C2 framework, etc.). Canary can still evaluate it, but be aware:
+> - Cloning or running any code from this repo may trigger your AV/EDR or violate corporate policy.
+> - Static analysis tools may reproduce malicious signatures in their output.
+> - Canary will only read files via the GitHub API — nothing will be cloned to your machine.
+>
+> Do you want to proceed with a Quick (API-only) evaluation?"
+
+If the user wants to proceed: default them to Quick regardless of what they choose, and note the override in the report. Do not offer Medium or Full for repos flagged as offensive tooling.
+
 **Tell the user:**
 
-> "Canary v2.5
+> "Canary v2.6 — use at your own risk. Canary reduces risk but does not guarantee safety. Use your own judgment before installing any software.
 >
-> Everything I do during this evaluation is [Claude] — I'm fetching and reading code on your behalf using the GitHub API and other tools. I won't run anything from this software on your machine unless you choose Full mode, in which case those actions will be clearly labeled [software under test] and I'll confirm with you before running anything."
+> Everything I do during this evaluation is [Claude] — I'm fetching and reading code on your behalf. Nothing from this repo will be cloned or saved to your machine. If you choose Full mode, the software runs inside an isolated sandbox and those actions will be labeled [software under test]."
 
 Then ask:
 
 > "How thorough should I be?
 >
-> - **Quick** — I'll read the most important files (entry points, install scripts, anything that runs at startup) and look for red flags using my own analysis. No external tools needed. Takes about a minute.
-> - **Medium** — I'll read the full codebase, run specialized scanning tools (semgrep, bandit, trufflehog, gitleaks), check all dependencies for known security vulnerabilities, and assess code quality. Takes a few minutes.
-> - **Full** — Everything in Medium, plus I'll run it in an isolated sandbox and watch what it actually does (network connections, files touched, whether it tries to persist). Requires Windows Sandbox, Wireshark, and Sysinternals. If any of these aren't installed, I'll walk you through it."
+> - **Quick** — I'll read the most important files via the GitHub API (entry points, install scripts, anything that runs at startup) and look for red flags using my own analysis. Nothing is cloned to your machine. No external tools needed. Takes about a minute.
+> - **Medium** — I'll do a full static analysis using semgrep, bandit, trufflehog, and gitleaks — all running inside Windows Sandbox so nothing from the target touches your machine. Requires Windows Sandbox (built into Windows 10/11 Pro). Takes a few minutes.
+> - **Full** — Everything in Medium, plus I'll run the software inside the sandbox and watch what it actually does (network connections, files touched, whether it tries to persist). Requires Windows Sandbox, Wireshark, and Sysinternals. If any of these aren't installed, I'll walk you through it."
 
 **After the user chooses a tier, run dependency checks before doing anything else:**
 
@@ -161,45 +180,86 @@ If target is a local path, pip package, or npm package: no tool check needed for
 
 Run all Quick checks first, then:
 
-Check pip/Python (needed to install pip-based tools):
-```bash
-pip --version 2>/dev/null || pip3 --version 2>/dev/null || python -m pip --version 2>/dev/null
-```
-
-Check winget (Windows, needed for winget-based installs):
+**Check Windows Sandbox (required for Medium):**
 ```powershell
-winget --version 2>$null
+(Get-WindowsOptionalFeature -Online -FeatureName Containers-DisposableClientVM -ErrorAction SilentlyContinue).State
 ```
 
-Check all static analysis tools:
+If not Enabled:
+> "Medium scan requires Windows Sandbox — static analysis tools run inside it so no target code or raw tool output ever touches your machine. Windows Sandbox isn't enabled yet.
+>
+> Options:
+> - **Enable it now** — I'll run the command; requires a reboot, then come back and start the scan again.
+> - **Switch to Quick** — I'll do an API-only evaluation. No sandbox needed, but no static analysis tools.
+>
+> What would you prefer?"
+
+If user chooses Enable:
+```powershell
+Enable-WindowsOptionalFeature -Online -FeatureName Containers-DisposableClientVM
+```
+Then stop and tell the user to reboot and restart the scan.
+
+If user chooses Quick: restart at Phase 1 with Quick tier. Do not proceed with Medium without Windows Sandbox.
+
+**Check canary sandbox scripts (required for Medium):**
+```powershell
+Test-Path 'C:\sandbox\scripts\run-watchdog.ps1'
+```
+If missing:
+> "The canary sandbox infrastructure isn't installed. Running the installer..."
+```powershell
+irm https://raw.githubusercontent.com/AppDevOnly/canary/main/install.ps1 | iex
+```
+
+**Check static analysis tools** (these will run inside the sandbox, but we verify they're installed on the host so they can be copied in):
+
+Check trufflehog version specifically — must be v3.x:
+```bash
+trufflehog --version 2>/dev/null
+```
+If missing or showing v2.x:
+> "trufflehog needs to be v3.x. Download the release binary from https://github.com/trufflesecurity/trufflehog/releases (do NOT use winget or pip — they install the wrong version). Let me know when it's installed."
+
+Check other tools:
 ```bash
 semgrep --version 2>/dev/null && echo "semgrep: OK" || echo "semgrep: MISSING"
 bandit --version 2>/dev/null && echo "bandit: OK" || echo "bandit: MISSING"
-trufflehog --version 2>/dev/null && echo "trufflehog: OK" || echo "trufflehog: MISSING"
 gitleaks version 2>/dev/null && echo "gitleaks: OK" || echo "gitleaks: MISSING"
 pip-audit --version 2>/dev/null && echo "pip-audit: OK" || echo "pip-audit: MISSING"
 npm --version 2>/dev/null && echo "npm: OK" || echo "npm: MISSING"
 ```
 
+**After installing any tool, verify it's callable** — don't trust that install succeeded just because the installer returned 0:
+```bash
+# Example for semgrep
+semgrep --version 2>/dev/null && echo "CALLABLE" || echo "NOT ON PATH"
+```
+If a tool installs but isn't callable: warn the user that pip --user installs on Windows often aren't on PATH. Suggest adding the Python Scripts folder to PATH or using the full path as fallback.
+
+**Check pip version** — old pip can fail silently:
+```bash
+pip --version 2>/dev/null
+```
+If pip is available but older than 21.x: suggest `python -m pip install --upgrade pip` before installing other tools.
+
 Show a clean summary to the user before asking to install anything:
 
 > "Here's what I found on your machine:
+> ✅ Windows Sandbox — enabled
 > ✅ semgrep
 > ✅ bandit
-> ⬜ trufflehog — not installed
+> ⬜ trufflehog — not installed (need v3.x from GitHub releases)
 > ⬜ gitleaks — not installed
 > ✅ pip-audit
 > ✅ npm
 >
-> I need to install trufflehog and gitleaks before I can start. Want me to do that now? It'll take about a minute each and I'll confirm each one works before moving on."
+> I need to install trufflehog and gitleaks before I can start. Want me to do that now?"
 
-Install missing tools one at a time. Confirm each works before moving to the next.
+Install missing tools one at a time. Confirm each is callable before moving to the next.
 
 If pip/Python is not available and a pip-based tool is missing:
 > "I need Python/pip installed to set up [tool]. Is Python installed on your machine? If it is, try opening a new terminal and running `pip --version`. If Python isn't installed yet, I can walk you through installing it first."
-
-If winget is not available and a winget-based tool is missing:
-> "winget isn't available on this machine. I can walk you through installing [tool] manually — want me to do that?"
 
 If the user declines any tool: note it as a limitation. Never skip silently — always record what was skipped and why.
 
@@ -260,14 +320,15 @@ irm https://raw.githubusercontent.com/AppDevOnly/canary/main/install.ps1 | iex
 > - Fetch repo metadata and file tree from GitHub API
 > - Read source files directly from GitHub (no download to your machine)
 > - Search for secrets, hardcoded credentials, and suspicious patterns in the code
-> *(Medium + Full only)* Run `semgrep`, `bandit`, `trufflehog`, and `gitleaks` on your machine for deeper static analysis
-> *(Medium + Full only)* Run `pip-audit` and/or `npm audit` to check dependencies for known CVEs
+> *(Medium + Full only)* Launch Windows Sandbox and run `semgrep`, `bandit`, `trufflehog`, and `gitleaks` inside it — nothing from the target is ever written to your machine; only my interpreted summary leaves the sandbox
+> *(Medium + Full only)* Run `pip-audit` and/or `npm audit` inside the sandbox to check dependencies for known CVEs
 > - Write a report to `~/canary-reports/`
+> - Delete all target files (clone, downloads, sandbox output) after the report is written
 > - Save scan progress after each step so you can resume if anything interrupts
 >
-> *(Full only)* **[software under test] — this is the code running on your machine:**
-> - Download the target release binary to a temporary folder
-> - Launch Windows Sandbox (or Docker) and run the software inside it
+> *(Full only)* **[software under test] — this is the code running inside the sandbox:**
+> - Clone the target repo and download the release binary inside the sandbox
+> - Run the software inside Windows Sandbox — it cannot touch your files, browser, or main system
 > - Observe what network connections it makes, what files it creates, whether it tries to persist
 > - Sandbox is destroyed after evaluation — nothing persists to your main system
 >
@@ -322,61 +383,131 @@ Flag these patterns (rate each CRITICAL / HIGH / MEDIUM / LOW / INFO):
 
 Save state after 2a completes.
 
-### 2b. Semgrep static analysis
+### 2b–2d. Sandbox static analysis (Medium and Full)
 
-**Medium and above only.**
+**Medium and above only. All static analysis tools run inside Windows Sandbox — nothing from the target is written to the host machine.**
 
-**Progress:** "Running semgrep static analysis — this may take 30-60 seconds..." Every 30 seconds if still running: "Semgrep still running... [elapsed]s elapsed." When done: "Semgrep complete — [N findings / no findings]."
+**Architecture:** Generate a Medium-mode sandbox config that:
+1. Maps tool binaries (semgrep, bandit, trufflehog, gitleaks) from host into sandbox (read-only)
+2. Clones the target repo inside the sandbox (no clone on host)
+3. Runs all static analysis tools inside the sandbox
+4. Writes tool outputs to `C:\sandbox\output\` (mapped read-write)
+5. Claude reads tool outputs from the mapped output folder and interprets them — raw JSON never lands in Claude's context as a code block; it is parsed and summarized
 
-If semgrep is available, run against the local clone or downloaded source:
-```bash
-semgrep --config=auto --json 2>/dev/null | grep -i "severity\|message\|path\|line"
+**Generate sandbox setup for static analysis:**
+
+Generate `C:\sandbox\scripts\setup-static.ps1` with the following behavior inside the sandbox:
+
+```powershell
+# Inside sandbox — runs as part of bootstrap
+Set-ExecutionPolicy Bypass -Scope Process -Force
+Start-Transcript 'C:\sandbox-output\setup-static.log'
+
+# 1. Clone the target repo
+$targetUrl = '{{TARGET_CLONE_URL}}'  # e.g. https://github.com/foo/bar
+$cloneDir  = 'C:\target'
+git clone --depth 1 $targetUrl $cloneDir 2>&1
+if (-not (Test-Path $cloneDir)) {
+    Write-Host "RESULT: Clone failed"
+    Stop-Transcript; exit 1
+}
+Write-Host "Clone complete — $((Get-ChildItem $cloneDir -Recurse -File).Count) files"
+
+# 2. Run semgrep
+$semgrepExe = 'C:\tools\semgrep\semgrep.exe'
+if (Test-Path $semgrepExe) {
+    Write-Host "Running semgrep..."
+    & $semgrepExe --config=auto --json $cloneDir 2>'C:\sandbox-output\semgrep-stderr.txt' |
+        Out-File 'C:\sandbox-output\semgrep.json' -Encoding UTF8
+    Write-Host "Semgrep stderr: $(Get-Content 'C:\sandbox-output\semgrep-stderr.txt' -Raw)"
+} else { Write-Host "SKIP semgrep — not found at $semgrepExe" }
+
+# 3. Run bandit (Python projects)
+if (Test-Path "$cloneDir\*.py" -or Test-Path "$cloneDir\setup.py") {
+    $banditExe = 'C:\tools\bandit\bandit.exe'
+    if (Test-Path $banditExe) {
+        Write-Host "Running bandit..."
+        & $banditExe -r $cloneDir -f json 2>'C:\sandbox-output\bandit-stderr.txt' |
+            Out-File 'C:\sandbox-output\bandit.json' -Encoding UTF8
+        Write-Host "Bandit stderr: $(Get-Content 'C:\sandbox-output\bandit-stderr.txt' -Raw)"
+    }
+}
+
+# 4. Run trufflehog
+$trufflehogExe = 'C:\tools\trufflehog\trufflehog.exe'
+if (Test-Path $trufflehogExe) {
+    Write-Host "Running trufflehog..."
+    & $trufflehogExe git "file://$cloneDir" --json 2>'C:\sandbox-output\trufflehog-stderr.txt' |
+        Out-File 'C:\sandbox-output\trufflehog.json' -Encoding UTF8
+    Write-Host "Trufflehog stderr: $(Get-Content 'C:\sandbox-output\trufflehog-stderr.txt' -Raw)"
+}
+
+# 5. Run gitleaks
+$gitleaksExe = 'C:\tools\gitleaks\gitleaks.exe'
+if (Test-Path $gitleaksExe) {
+    Write-Host "Running gitleaks..."
+    & $gitleaksExe detect --source $cloneDir --report-format json --report-path 'C:\sandbox-output\gitleaks.json' 2>'C:\sandbox-output\gitleaks-stderr.txt'
+    Write-Host "Gitleaks stderr: $(Get-Content 'C:\sandbox-output\gitleaks-stderr.txt' -Raw)"
+}
+
+# 6. Run pip-audit (Python) / npm audit (Node)
+if (Test-Path "$cloneDir\requirements*.txt") {
+    pip-audit -r "$cloneDir\requirements.txt" --format json 2>'C:\sandbox-output\pip-audit-stderr.txt' |
+        Out-File 'C:\sandbox-output\pip-audit.json' -Encoding UTF8
+}
+if (Test-Path "$cloneDir\package.json") {
+    Push-Location $cloneDir
+    npm audit --json 2>'C:\sandbox-output\npm-audit-stderr.txt' |
+        Out-File 'C:\sandbox-output\npm-audit.json' -Encoding UTF8
+    Pop-Location
+}
+
+Write-Host "RESULT: Static analysis complete"
+Stop-Transcript
 ```
 
-Focus on HIGH and CRITICAL findings. Skip INFO-level noise. If semgrep isn't available (user declined install), note it in the report and rely on manual code inspection.
+**Critical rules for all tool output:**
+- Never print raw JSON blobs into Claude's conversation — always parse and summarize
+- Always capture stderr from every tool run; surface errors in a "Tool Errors" section in the report
+- If a tool crashes (non-zero exit + no output file), log it as a tool error — do NOT silently skip
+- If semgrep crashes with a Unicode error: log the offending file path, skip it, continue full-scope scan — do NOT narrow the scan directory
+- If a tool output file is empty or missing after the sandbox run, note it as a tool error
 
-Save state after 2b completes.
+**After sandbox completes, read results from `C:\sandbox\output\`:**
 
-### 2c. Bandit (Python projects only)
+**2b — Semgrep findings:**
 
-**Medium and above only.**
+**Progress:** "Reading semgrep results..." When done: "Semgrep complete — [N findings / no findings / tool error: X]."
 
-**Progress:** "Running bandit Python security scan..." When done: "Bandit complete — [N findings / no findings]."
+Parse `C:\sandbox\output\semgrep.json`. Focus on HIGH and CRITICAL findings. Skip INFO-level noise.
 
-If the project is Python and bandit is available:
-```bash
-bandit -r . -f json 2>/dev/null | grep -i "issue_severity\|issue_text\|filename\|line_number"
-```
+**2c — Bandit findings (Python only):**
 
-Flag HIGH and MEDIUM severity findings. Cross-reference with manual code inspection — bandit has false positives.
+**Progress:** "Reading bandit results..." When done: "Bandit complete — [N findings / no findings]."
 
-Save state after 2c completes.
+Parse `C:\sandbox\output\bandit.json`. Flag HIGH and MEDIUM severity. Cross-reference with manual code inspection — bandit has false positives.
 
-### 2d. Secrets scan
+**2d — Secrets scan:**
 
-**Medium and above only.**
+**Progress:** "Reading secrets scan results..." When done: "Secrets scan complete — [N secrets found / no secrets found]."
 
-**Progress:** "Scanning git history for secrets..." When done: "Secrets scan complete — [N secrets found / no secrets found]."
-
-If trufflehog is available, scan git history for secrets (catches things committed then deleted):
-```bash
-trufflehog git file://. --json 2>/dev/null | head -100
-```
-
-If gitleaks is available, run a fast secrets scan:
-```bash
-gitleaks detect --source . --report-format json 2>/dev/null | head -100
-```
-
-If neither is available, manually search for patterns:
-- Long random strings adjacent to words: key, token, secret, password, api, auth
-- AWS key patterns: `AKIA[0-9A-Z]{16}`
-- Private key headers: `-----BEGIN (RSA|EC|DSA|OPENSSH) PRIVATE KEY-----`
-- Common service patterns: `sk-[a-zA-Z0-9]{32,}`, `ghp_[a-zA-Z0-9]{36}`
+Parse `C:\sandbox\output\trufflehog.json` and `C:\sandbox\output\gitleaks.json`.
 
 Report any matches with file + line number. Rate HIGH if found in committed source. Do NOT print the full value — show first 8 chars + `...`
 
-Save state after 2d completes.
+If static tools weren't available (user running Quick or tools missing), manually search via GitHub API for patterns:
+- Long random strings adjacent to words: key, token, secret, password, api, auth
+- AWS key patterns: `AKIA[0-9A-Z]{16}`
+- Private key headers: `-----BEGIN (RSA|EC|DSA|OPENSSH) PRIVATE KEY-----`
+
+**After reading all tool outputs, delete sandbox output files from the host:**
+```powershell
+Remove-Item 'C:\sandbox\output\*.json' -ErrorAction SilentlyContinue
+Remove-Item 'C:\sandbox\output\*.txt' -ErrorAction SilentlyContinue
+Remove-Item 'C:\sandbox\output\*.log' -ErrorAction SilentlyContinue
+```
+
+Save state after static analysis phases complete.
 
 ### 2e. Dependency audit
 
@@ -673,7 +804,38 @@ Note: Docker provides filesystem isolation but limited network/process monitorin
 
 ---
 
-## Phase 5 — Write the report
+## Phase 5 — Cleanup and write the report
+
+**Cleanup before writing the report** — delete all target files from the host regardless of scan outcome:
+
+```powershell
+# Remove any local clone (should not exist for Medium/Full, but clean up just in case)
+$clonePath = "$HOME\canary-scans\$targetSlug"
+if (Test-Path $clonePath) {
+    Remove-Item $clonePath -Recurse -Force
+    Write-Host "Cleanup: deleted clone at $clonePath"
+} else {
+    Write-Host "Cleanup: no clone found on host (expected for sandbox scans)"
+}
+
+# Remove any downloaded archives or temp files
+Remove-Item "$HOME\canary-scans\$targetSlug*" -Recurse -Force -ErrorAction SilentlyContinue
+
+# Remove sandbox output files (already deleted after reading in Phase 2, but verify)
+Remove-Item 'C:\sandbox\output\*.json' -ErrorAction SilentlyContinue
+Remove-Item 'C:\sandbox\output\*.txt' -ErrorAction SilentlyContinue
+Remove-Item 'C:\sandbox\output\*.log' -ErrorAction SilentlyContinue
+Remove-Item 'C:\sandbox\output\*.pml' -ErrorAction SilentlyContinue
+Remove-Item 'C:\sandbox\output\*.csv' -ErrorAction SilentlyContinue
+Remove-Item 'C:\sandbox\output\*.pcap*' -ErrorAction SilentlyContinue
+
+# Remove generated .wsb and setup files for this target
+Remove-Item "C:\sandbox\$targetName.wsb" -ErrorAction SilentlyContinue
+Remove-Item 'C:\sandbox\scripts\setup.ps1' -ErrorAction SilentlyContinue
+Remove-Item 'C:\sandbox\scripts\setup-static.ps1' -ErrorAction SilentlyContinue
+```
+
+Note the cleanup result in the report. If deletion failed for any file, log the path and reason — do not silently skip.
 
 **Progress:** "Writing report..."
 
@@ -687,10 +849,18 @@ Format for plain-text readability — no markdown tables, no `---` dividers, no 
 Date: <date>
 Target: <url or path>
 Evaluation: <Quick / Medium / Full> — Static Analysis
-Tool: Canary v2.5
+Tool: Canary v2.6
 
 
 ## Verdict: ✅ Safe / ⚠️ Caution / ❌ Unsafe
+
+**Verdict guidance:**
+- ✅ Safe — no significant findings; normal use path is low risk
+- ⚠️ Caution — notable findings that the user should review before use; risks are manageable with care
+- ❌ Unsafe — one of the following applies:
+  - Hidden malicious behavior found (C2, credential theft, auto-execution of hostile code)
+  - "Dangerous by design": the normal use path (clone → run) exposes the user to serious risk even without a hidden backdoor — applies to exploit collections, C2 frameworks, repos with unverified binaries whose purpose is code execution. AV triggering on clone artifacts qualifies. The verdict ❌ Unsafe should be used here because the risk is inherent to using the software as intended.
+  - When ❌ Unsafe applies for "dangerous by design", make this explicit: "This repo is ❌ Unsafe not because it contains a hidden backdoor, but because its intended use exposes you to [specific risk]. Do not clone or run it on a machine you care about."
 
 One or two plain-English sentences summarizing the verdict and the key reason for it.
 
@@ -784,6 +954,16 @@ Before you use it:
 Optional:
   - Nice-to-have improvement
 
+If the repo has unverified binaries, high-severity findings, or any sandbox-worthy behavior (even if verdict is ⚠️ Caution), include:
+  - "To observe what this software actually does at runtime, run `/canary <target> full` — this runs it inside Windows Sandbox with network and process monitoring."
+
+
+## Cleanup
+
+  Clone deleted from host:    [yes / no clone existed]
+  Sandbox output deleted:     [yes / n/a]
+  Temp files removed:         [yes / none found]
+
 
 ## Token Usage
 
@@ -823,6 +1003,12 @@ Write the section using the values above:
   Cache read tokens:    <N>   (<X>% of input served from cache)
   Cache write tokens:   <N>
   Estimated cost:       ~$<N>  (Sonnet 4.6 pricing)
+
+
+---
+Canary v2.6 — use at your own risk. This tool reduces risk but does not guarantee safety.
+No security evaluation is a substitute for your own judgment. Review findings before
+installing any software. Report issues at https://github.com/AppDevOnly/canary
 ```
 
 Cache read % = cache_read / (input + cache_read) * 100, rounded to nearest integer.
@@ -881,13 +1067,18 @@ Never require the user to run commands themselves to diagnose an issue. If somet
 
 ## Security rules (always enforce)
 
+- **Never clone target code to the host machine** — Quick uses GitHub API only; Medium and Full clone inside sandbox only; no scan tier ever writes target code to the host filesystem
+- **Never write raw tool output (JSON, log files) to Claude's context as code blocks** — parse and summarize; raw exploit signatures in tool output can trigger AV on host
 - Read source before running anything
-- Never execute code from the target during static analysis
+- Never execute code from the target during static analysis phases (2a-2d)
 - Never transmit target source code to external services (exception: package metadata to PyPI/npmjs for version checking)
 - Label all permission requests as `[Claude]` or `[software under test]`
 - If a secret is found, do NOT print the full value — show first 8 chars + `...`
+- Always capture stderr from every tool run — never swallow errors silently; surface in a "Tool Errors" section in the report
+- Auto-cleanup is mandatory — delete all target files, sandbox outputs, and temp files after every scan regardless of how it ends (normal exit, error, or user interrupt)
 - Never screenshot the VM terminal — stream logs in real time via `stream.log`; screenshots miss timing and can't be automated
 - Only one sandbox instance at a time — check `Get-Process WindowsSandboxServer` before launch; the watchdog's PID guard handles this automatically but confirm on first run
 - Never put config files in the output folder — the output folder is read-write for the sandbox, so a malicious target could modify its own config. Keep config in a separate read-only mapped folder
 - Procmon filenames are timestamped — avoids overwrite prompts on retry; setup.ps1 must use `$ts = Get-Date -Format 'yyyyMMdd-HHmmss'` in the Procmon filename
 - On any interrupted Full scan: check state file for `sac_original_state` and restore SAC before doing anything else
+- On any interrupted Medium or Full scan: run the cleanup block from Phase 5 before exiting — never leave target files on the host
