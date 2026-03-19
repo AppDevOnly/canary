@@ -257,20 +257,38 @@ trufflehog --version 2>/dev/null
 - If **showing v2.x** (legacy pip install):
   > "You have trufflehog v2.x installed — that's the old pip version with a different CLI. Canary needs v3.x. Uninstall the old one with `pip uninstall trufflehog`, then follow the binary install steps above."
 
-Check other tools:
+**semgrep:**
 ```bash
-semgrep --version 2>/dev/null && echo "semgrep: OK" || echo "semgrep: MISSING"
-bandit --version 2>/dev/null && echo "bandit: OK" || echo "bandit: MISSING"
-gitleaks version 2>/dev/null && echo "gitleaks: OK" || echo "gitleaks: MISSING"
-pip-audit --version 2>/dev/null && echo "pip-audit: OK" || echo "pip-audit: MISSING"
-npm --version 2>/dev/null && echo "npm: OK" || echo "npm: MISSING"
+semgrep --version 2>/dev/null
 ```
+- If missing: `pip install semgrep`, then verify: `semgrep --version 2>/dev/null && echo "OK" || echo "NOT ON PATH"`
+- If not callable after install: pip --user installs on Windows often miss PATH. Ask the user to open a new terminal and try again. If still missing, find the Scripts folder: `python -m site --user-site` (Scripts is one level up from site-packages). Add it to PATH or note as a limitation.
+- Known behavior: first run downloads rules and may take 30–60s — tell the user this is normal.
 
-**After installing any tool, verify it's callable** — don't trust that install succeeded just because the installer returned 0:
+**bandit:**
 ```bash
-semgrep --version 2>/dev/null && echo "CALLABLE" || echo "NOT ON PATH"
+bandit --version 2>/dev/null
 ```
-If a tool installs but isn't callable: warn the user that pip --user installs on Windows often aren't on PATH. Suggest adding the Python Scripts folder to PATH or using the full path as fallback.
+- If missing: `pip install bandit`, then verify callable.
+- If not callable after install: same PATH fix as semgrep.
+
+**gitleaks:**
+```bash
+gitleaks version 2>/dev/null
+```
+- If missing on **Windows**: `winget install gitleaks`. If winget fails or isn't available, download the binary from https://github.com/gitleaks/gitleaks/releases/latest (`gitleaks_X.X.X_windows_x64.zip`), extract `gitleaks.exe`, place in a folder on PATH (e.g. `C:\tools\gitleaks\`).
+- If missing on **Mac/Linux**: `brew install gitleaks`
+- Verify after install: `gitleaks version` should show a version number.
+
+**pip-audit:**
+```bash
+pip-audit --version 2>/dev/null
+```
+- If missing: `pip install pip-audit`, then verify callable.
+- If not callable after install: same PATH fix as semgrep.
+
+**npm:**
+Already checked in the runtime prereq step above. If missing and the target has a `package.json`, note it as a scan limitation — npm audit will be skipped. Don't block the scan.
 
 Show a clean summary to the user before asking to install anything:
 
@@ -294,9 +312,6 @@ $gitleaksPath   = (Get-Command gitleaks   -ErrorAction SilentlyContinue).Source
 ```
 
 Save both paths to the state file under `trufflehog_path` and `gitleaks_path`. These will be used when generating the sandbox `.wsb` config to create the correct `MappedFolder` blocks. If either path is null (tool not found after install), record it as a limitation and plan to install fresh inside the sandbox instead.
-
-If pip/Python is not available and a pip-based tool is missing:
-> "I need Python/pip installed to set up [tool]. Is Python installed on your machine? If it is, try opening a new terminal and running `pip --version`. If Python isn't installed yet, I can walk you through installing it first."
 
 If the user declines any tool: note it as a limitation. Never skip silently — always record what was skipped and why.
 
@@ -329,13 +344,25 @@ Test-Path 'C:\temp\security-tools\Sysinternals\Procmon64.exe'
 Test-Path 'C:\temp\security-tools\Sysinternals\autorunsc64.exe'
 ```
 If missing:
-> "Sysinternals isn't installed at the expected path. Download the Sysinternals Suite from https://learn.microsoft.com/sysinternals/downloads/sysinternals-suite and extract it to `C:\temp\security-tools\Sysinternals\`. Let me know when that's done and I'll continue."
+> "Sysinternals isn't installed at the expected path. Here's how to set it up:
+> 1. Go to https://learn.microsoft.com/sysinternals/downloads/sysinternals-suite
+> 2. Download `SysinternalsSuite.zip`
+> 3. Create the folder `C:\temp\security-tools\Sysinternals\` if it doesn't exist
+> 4. Extract everything from the zip into that folder
+> 5. You should now have `Procmon64.exe` and `autorunsc64.exe` in there
+>
+> Let me know when that's done and I'll continue."
 
-Check tshark:
+After user confirms: verify both files exist before proceeding.
+
+**tshark:**
 ```bash
-tshark --version 2>/dev/null && echo "OK" || echo "MISSING"
+tshark --version 2>/dev/null
 ```
-If missing: offer `winget install WiresharkFoundation.Wireshark`. Verify after.
+- If missing on **Windows**: `winget install WiresharkFoundation.Wireshark`. This installs the full Wireshark suite which includes tshark. Requires a reboot or new terminal for PATH to update.
+- If missing on **Mac**: `brew install wireshark` (includes tshark).
+- Verify after install: `tshark --version` should show a version number. If not found after install, open a new terminal — Wireshark's installer updates PATH but the change isn't visible in the current session.
+- Known issue on Windows: tshark requires Npcap (packet capture driver). The Wireshark installer includes it — accept the Npcap install prompt during setup.
 
 Check sandbox scripts:
 ```powershell
