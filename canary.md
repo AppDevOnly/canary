@@ -571,7 +571,28 @@ $wsbPath = "C:\sandbox\$targetName.wsb"
 $template | Out-File $wsbPath -Encoding UTF8 -Force
 ```
 
-**Write `setup.ps1` for this target** (generated fresh per target), then ask the user before launching:
+**Generate `setup.ps1` for this target from the template:**
+
+Read `C:\sandbox\scripts\setup-template.ps1`, fill in the placeholders, and write to `C:\sandbox\scripts\setup.ps1`:
+
+- `{{TARGET_NAME}}` — friendly name (e.g. `shadPS4`)
+- `{{TARGET_URL}}` — direct download URL for the release binary or zip. Find via GitHub releases API: `gh api repos/<owner>/<repo>/releases/latest --jq '.assets[] | select(.name | test("win.*64|x64.*win"; "i")) | .browser_download_url'`
+- `{{BINARY_NAME}}` — exact filename of the exe (check release asset name or README)
+- `{{EXTRACT_DIR}}` — extraction path inside sandbox (e.g. `C:\shadps4_local`)
+- `{{LAUNCH_ARGS}}` — command line args if needed, empty string if none
+
+```powershell
+$template = Get-Content 'C:\sandbox\scripts\setup-template.ps1' -Raw
+$template = $template -replace '{{TARGET_NAME}}',  $targetName
+$template = $template -replace '{{TARGET_URL}}',   $targetUrl
+$template = $template -replace '{{BINARY_NAME}}',  $binaryName
+$template = $template -replace '{{EXTRACT_DIR}}',  $extractDir
+$template = $template -replace '{{LAUNCH_ARGS}}',  $launchArgs
+$template | Out-File 'C:\sandbox\scripts\setup.ps1' -Encoding UTF8 -Force
+Write-Host "setup.ps1 generated for $targetName"
+```
+
+Then ask the user before launching:
 
 > "Will you be interacting with the sandbox directly (clicking, typing commands), or should I run everything automatically and you just watch this window?"
 
