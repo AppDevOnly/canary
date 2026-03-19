@@ -65,34 +65,6 @@ tshark / Wireshark    —            —                 required
 Canary sandbox scripts—            required          required
 ```
 
-**Architecture note:** No scan tier ever clones or writes target code to the host machine.
-- **Quick** — GitHub API only. Nothing touches your disk.
-- **Medium** — Static analysis tools run inside Windows Sandbox. Only Claude's interpreted summary leaves the sandbox; raw tool output stays inside.
-- **Full** — Same as Medium, plus the target binary runs inside the sandbox.
-
-### Install commands
-
-```
-gh:           winget install GitHub.cli            (Windows)
-              brew install gh                       (Mac/Linux)
-semgrep:      pip install semgrep
-bandit:       pip install bandit
-trufflehog:   Download the v3 release binary from https://github.com/trufflesecurity/trufflehog/releases
-              (do NOT use winget — the ID is wrong and falls back to pip which installs legacy v2.2.1)
-              (do NOT use pip — pip installs v2.x; canary requires v3.x CLI syntax)
-              Verify: trufflehog --version should show 3.x
-              Mac/Linux: brew install trufflehog
-gitleaks:     winget install gitleaks              (Windows)
-              brew install gitleaks                 (Mac)
-pip-audit:    pip install pip-audit
-npm:          Install Node.js from https://nodejs.org
-tshark:       winget install WiresharkFoundation.Wireshark
-Sysinternals: Download suite from https://learn.microsoft.com/sysinternals/downloads/sysinternals-suite
-              Extract to C:\temp\security-tools\Sysinternals\
-Windows Sandbox: Enable-WindowsOptionalFeature -Online -FeatureName Containers-DisposableClientVM
-              (requires reboot)
-```
-
 ### Tool install behavior
 
 No tool is ever skipped silently. When a tool is missing, tell the user exactly what it is, what it's needed for, and offer to install it. If the user declines, note it as a limitation in the report. Never proceed assuming a tool is there when you haven't checked.
@@ -567,6 +539,8 @@ Write to `~/canary-reports/<target-slug>-state.json`. Update this file after eac
 
 If the cap is reached, note it in the report: "File count capped at 500 of [N] total — [N] files not reviewed." This prevents exhausting the GitHub API rate limit (5,000 req/hour) on large repos.
 
+**Batch reads:** Read multiple files per tool call — fetch 5–10 files in parallel rather than one at a time. Each single-file read triggers a full cache re-injection; batching eliminates that overhead. Group by directory or risk tier when batching.
+
 Flag these patterns (rate each CRITICAL / HIGH / MEDIUM / LOW / INFO):
 
 - `eval()` / `exec()` on external input — **CRITICAL** (e.g. `eval(response.text)`)
@@ -740,6 +714,7 @@ Tell the user: "Sandbox analysis [complete / timed out after 10 minutes]. Readin
 
 **Critical rules for all tool output:**
 - Never print raw JSON blobs into Claude's conversation — always parse and summarize
+- **Summarize inside the sandbox** — add a summarization step to setup-static.ps1 that converts raw JSON to a plain-text `summary.txt` before the sandbox closes. Claude reads `summary.txt`, not the raw JSON files. This eliminates token waste and prevents AV triggers from exploit signatures in raw tool output landing in Claude's context.
 - Always capture stderr from every tool run; surface errors in a "Tool Errors" section in the report
 - If a tool crashes (non-zero exit + no output file), log it as a tool error — do NOT silently skip
 - If semgrep crashes with a Unicode error: log the offending file path, skip it, continue full-scope scan — do NOT narrow the scan directory
@@ -1364,14 +1339,7 @@ Then ask the user: "Want me to save a note so future sessions know this evaluati
 
 ## Troubleshooting
 
-At any point during the evaluation, the user can describe a problem in plain English and canary should respond helpfully. Examples:
-- "something popped up asking me to allow a network connection" â†’ advise what to do
-- "the sandbox window closed early" â†’ diagnose and offer to re-run
-- "it's been sitting here for 5 minutes" â†’ check what's stuck and recover
-- "I see an error that says X" â†’ interpret and fix
-- "I restarted my PC / closed Claude" â†’ check for state file and offer to resume
-
-Never require the user to run commands themselves to diagnose an issue. If something is wrong, canary figures it out and handles it.
+Respond to any plain-English problem description at any point during the evaluation. Diagnose and fix without requiring the user to run commands themselves.
 
 ---
 
