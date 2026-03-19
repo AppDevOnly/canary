@@ -1,10 +1,10 @@
 ---
 description: Evaluate code for security issues, dependency vulnerabilities, bugs, and quality problems before installing
-version: 2.3
+version: 2.4
 ---
 
 # /canary
-# canary-version: 2.3
+# canary-version: 2.4
 
 Evaluate code before you trust it. Canary reads source code, checks for security issues, scans for known vulnerabilities, and can run the code in an isolated sandbox — then gives you a plain-English verdict.
 
@@ -140,7 +140,7 @@ For Quick and Medium, only check `gh`, `pip-audit`, `npm`, `semgrep`, `bandit`, 
 
 **Before starting, tell the user:**
 
-> "Canary v2.3
+> "Canary v2.4
 >
 > Everything I do during this evaluation is [Claude] — I'm fetching and reading code on your behalf using the GitHub API and other tools. I won't run anything from this software on your machine unless you choose Full mode, in which case those actions will be clearly labeled [software under test] and I'll confirm with you before running anything."
 
@@ -286,14 +286,26 @@ If Windows Sandbox is available:
 **Autoruns baseline — run before launching the sandbox:**
 
 ```powershell
-$autorunsExe = 'C:\temp\security-tools\Sysinternals\Autoruns64.exe'
+$autorunsExe = 'C:\temp\security-tools\Sysinternals\autorunsc64.exe'
 if (Test-Path $autorunsExe) {
-    & $autorunsExe /accepteula /a * /x /c C:\sandbox\output\autoruns-before.csv
+    & $autorunsExe /accepteula '-a' '*' -c -h -s -nobanner -o 'C:\sandbox\output\autoruns-before.csv' '*'
     Write-Host "Autoruns baseline saved."
 }
 ```
 
-After the sandbox run, take a second snapshot and diff the two to detect any persistence the software attempted to install. Flag any new entries as HIGH.
+After the sandbox run, take a second snapshot and diff:
+
+```powershell
+& $autorunsExe /accepteula '-a' '*' -c -h -s -nobanner -o 'C:\sandbox\output\autoruns-after.csv' '*'
+
+# Show new entries (persistence attempts)
+$before = Import-Csv 'C:\sandbox\output\autoruns-before.csv'
+$after  = Import-Csv 'C:\sandbox\output\autoruns-after.csv'
+Compare-Object $before $after -Property 'Image Path','Entry' |
+    Where-Object { $_.SideIndicator -eq '=>' }
+```
+
+Flag any new entries as HIGH — they represent persistence the software attempted to install outside the sandbox.
 
 **Pre-flight: check Smart App Control (SAC) state before launching.**
 
@@ -321,7 +333,46 @@ Before launching, warn the user:
 
 - If `setup.log` contains `"RESULT: Binary could not be launched"` — **do not retry**. Record as a sandbox finding: "Binary blocked — likely SAC/WDAC policy or missing dependency. Dynamic analysis not possible on this system without further configuration." Proceed to write the report.
 - If the sandbox exited before `setup.log` appeared (mapped-folder failure) — retry **once only**, then report the failure.
-- If the binary launched successfully — report network connections, file/registry artifacts, and persistence behavior from the logs.
+- If the binary launched successfully — run post-run analysis before writing the report.
+
+**Post-run analysis (binary launched successfully):**
+
+Unique DNS names queried by the sandbox:
+```powershell
+Get-Content C:\sandbox\output\network-vswitch.log |
+    ForEach-Object { ($_ -split '\|')[3] } |
+    Where-Object { $_ -and $_ -notmatch '^\d' -and $_ -notmatch 'arpa' } |
+    Sort-Object -Unique
+```
+
+External IPs connected to:
+```powershell
+Get-Content C:\sandbox\output\network-vswitch.log |
+    ForEach-Object {
+        $p = $_ -split '\|'
+        if ($p[1] -match '^172\.27\.' -and $p[4] -in @('443','80')) { $p[2] }
+    } | Sort-Object -Unique
+```
+
+Separate Windows OS baseline traffic (WindowsUpdate, OCSP, licensing) from target-initiated connections. Flag any connections the target made to unexpected domains as HIGH.
+
+**PID chain analysis** — the network log shows *where* connections went; the PID chain shows *who made them*. This catches process injection, LOL-bins, and unexpected child process spawning.
+
+If `analyze-pid-chain.ps1` is available at `C:\sandbox-eval-repo\scripts\`:
+```powershell
+powershell -ExecutionPolicy Bypass -File C:\sandbox-eval-repo\scripts\analyze-pid-chain.ps1 `
+    -PmlFile C:\sandbox\output\procmon-internal-<timestamp>.pml
+```
+
+If not available, manually review the Procmon log for:
+- Any network connection that doesn't trace back to the target process
+- Chains involving `cmd.exe → powershell.exe → curl/certutil` (exfil via LOL-bins)
+- The target spawning processes you didn't expect (shell, scripting engine, system utilities)
+- Any chain involving `lsass.exe`, `winlogon.exe`, or `svchost.exe` as an ancestor of user-space network activity
+
+Flag unexpected chains as HIGH. Include the full ancestry in the report: `targetapp.exe (PID 1234) → cmd.exe (PID 5678) → certutil.exe (PID 9012) → [connection to external-ip]`
+
+Take the Autoruns diff after the sandbox closes and flag any new persistence entries as HIGH.
 
 **Before launching: verify sandbox infrastructure is installed.**
 
@@ -355,18 +406,22 @@ $wsbPath = "C:\sandbox\$targetName.wsb"
 $template | Out-File $wsbPath -Encoding UTF8 -Force
 ```
 
-**Write `setup.ps1` for this target** (generated fresh — see Phase 4 setup script guidance below), then launch:
+**Write `setup.ps1` for this target** (generated fresh per target), then ask the user before launching:
+
+> "Will you be interacting with the sandbox directly (clicking, typing commands), or should I run everything automatically and you just watch this window?"
+
+- **Automated** (default) — stall timeout 300s. Watchdog detects hangs quickly and retries.
+- **Interactive** — use `-StallTimeoutSec 3600`. Prevents watchdog from killing the sandbox while the user is reading output or typing between commands.
 
 ```powershell
+# Automated (default)
 powershell -NoExit -File C:\sandbox\scripts\run-watchdog.ps1 -WsbFile $wsbPath
+
+# Interactive
+powershell -NoExit -File C:\sandbox\scripts\run-watchdog.ps1 -WsbFile $wsbPath -StallTimeoutSec 3600
 ```
 
 Monitor `C:\sandbox\output\stream.log` in real time. Report progress to the user as it streams.
-
-```
-→ Use the /test-install protocol for full sandbox evaluation
-→ See ~/.claude/commands/test-install.md for the complete sandbox procedure
-```
 
 If Docker is available (cross-platform fallback):
 ```bash
@@ -392,7 +447,7 @@ Format for plain-text readability — no markdown tables, no `---` dividers, no 
 Date: <date>
 Target: <url or path>
 Evaluation: <Quick / Medium / Full> — Static Analysis
-Tool: Canary v2.3
+Tool: Canary v2.4
 
 
 ## Verdict: ✅ Safe / ⚠️ Caution / ❌ Unsafe
@@ -527,3 +582,7 @@ Never require the user to run commands themselves to diagnose an issue. If somet
 - Never transmit target source code to external services (exception: package metadata to PyPI/npmjs for version checking)
 - Label all permission requests as `[Claude]` or `[software under test]`
 - If a secret is found, do NOT print the full value — show first 8 chars + `...`
+- Never screenshot the VM terminal — stream logs in real time via `stream.log`; screenshots miss timing and can't be automated
+- Only one sandbox instance at a time — check `Get-Process WindowsSandboxServer` before launch; the watchdog's PID guard handles this automatically but confirm on first run
+- Never put config files in the output folder — the output folder is read-write for the sandbox, so a malicious target could modify its own config (e.g. re-enable disabled features). Keep config in a separate read-only mapped folder
+- Procmon filenames are timestamped — avoids overwrite prompts on retry; setup.ps1 must use `$ts = Get-Date -Format 'yyyyMMdd-HHmmss'` in the Procmon filename
