@@ -11,11 +11,14 @@ Evaluate code before you trust it. Canary reads source code, checks for security
 ## Usage
 ```
 /canary <target>
+/canary pr <pr-url>
 /canary update
 ```
-Where `<target>` is a GitHub URL, local path, `pip:<package>`, or `npm:<package>`.
+Where `<target>` is a GitHub URL, local path, `pip:<package>`, `npm:<package>`, and more (see Phase 1).
 
-**`/canary update`**  checks your installed version against the repo and reinstalls if behind.
+**`/canary pr <pr-url>`** - evaluates a pull request for supply chain compromise via GitHub API diff. No clone. See PR Review Mode section.
+
+**`/canary update`** - checks your installed version against the repo and reinstalls if behind.
 
 ---
 
@@ -34,7 +37,72 @@ irm https://raw.githubusercontent.com/AppDevOnly/canary/main/install.ps1 | iex
 ```
 4. Tell the user what was updated and remind them to restart Claude Code to pick up the new skill file.
 
-If already up to date, say so and stop  don't reinstall unnecessarily.
+If already up to date, say so and stop - don't reinstall unnecessarily.
+
+---
+
+## PR Review Mode
+
+If the user runs `/canary pr <pr-url>`, evaluate the pull request for supply chain compromise using the GitHub API diff only. No clone needed.
+
+**Important:** PR review must run from the known-good installed version of canary, not from the modified branch being evaluated.
+
+**Parse the PR URL** to extract owner, repo, and PR number:
+- `https://github.com/owner/repo/pull/123` -> owner=owner, repo=repo, pr=123
+
+**Fetch the PR diff via GitHub API:**
+```bash
+gh api repos/{owner}/{repo}/pulls/{pr}/files \
+  --jq '[.[] | {filename: .filename, status: .status, additions: .additions, deletions: .deletions, patch: .patch}]'
+```
+
+**What to look for in a PR diff:**
+
+High risk - flag immediately:
+- New or modified install scripts (setup.py, package.json scripts, Makefile, *.sh, *.ps1)
+- Changes to dependency manifests (requirements.txt, package.json, go.mod, Cargo.toml) that add new packages or change versions
+- New pre/post-install hooks
+- New binary files (.exe, .dll, .whl, etc.)
+- Obfuscated code added (base64 strings, encoded payloads)
+- New outbound network calls to undocumented domains
+- Changes to CI/CD pipelines (.github/workflows/, .gitlab-ci.yml)
+- Modifications to existing security-sensitive files (auth, crypto, session handling)
+
+Medium risk - note and review:
+- New dependencies not present before
+- Version bumps on existing dependencies (check if the new version has known CVEs via NVD)
+- Removed security checks or input validation
+- New eval()/exec() calls
+
+Report format for PR review:
+```
+# Canary PR Review: <repo> PR #<number>
+
+Date: <date>
+PR: <url>
+Title: <pr title>
+Author: <pr author>
+Files changed: <N> (+<additions> -<deletions>)
+Tool: Canary v2.8
+
+## Verdict: [OK] Safe / [!] Caution / [X] Unsafe
+
+<one sentence summary>
+
+## High Risk Changes
+<list any high-risk items found>
+
+## Dependency Changes
+<list any new or changed dependencies>
+
+## Files Reviewed
+<list of files in the diff with brief notes>
+
+## Recommendation
+<what to do before merging>
+```
+
+If the PR has no risky changes: "[OK] Safe - No supply chain risks found in this PR."
 
 ---
 
@@ -138,20 +206,33 @@ Parse `<target>`:
 - **Docker Hub** (`docker:<image>`)  fetch image metadata and check base image CVEs via Docker Hub API
 - **VS Code extension** (`vscode:<publisher.name>`)  fetch from VS Code Marketplace API, check manifest and scripts
 
+**Local path sandbox note:** For local path targets, Medium and Full modes copy files into the sandbox read-only - the original files on the host are never modified. The sandbox gets a snapshot of the directory at scan time. For Full mode, the software is run from the sandboxed copy, not from the original path. If the target path contains sensitive data (credentials, private keys), warn the user before copying it into the sandbox mapped folder.
+
 If the target format is unrecognized, tell the user the supported formats and ask them to clarify.
 
 If no target is provided, ask the user what they'd like to evaluate and explain the supported formats.
 
 **Offensive repo check:** Before presenting tier options, check the repo name and description for offensive security indicators: keywords such as `0day`, `exploit`, `poc`, `payload`, `shellcode`, `RAT`, `C2`, `backdoor`, `EXP`, `CVE` in the repo name, or descriptions mentioning "exploit collection", "proof of concept", or "offensive". If found:
 
-> "Heads up  this repo appears to be offensive security tooling (exploit code, POCs, C2 framework, etc.). Canary can still evaluate it, but be aware:
+> "Heads up - this repo appears to be offensive security tooling (exploit code, POCs, C2 framework, etc.). Before we go further:
 > - Cloning or running any code from this repo may trigger your AV/EDR or violate corporate policy.
 > - Static analysis tools may reproduce malicious signatures in their output.
-> - Canary will only read files via the GitHub API  nothing will be cloned to your machine.
+> - Quick mode reads files via the GitHub API only - nothing is cloned to your machine.
+> - Medium/Full mode runs tools inside a sandbox, but malicious signatures may still appear in tool output on your host.
 >
-> Do you want to proceed with a Quick (API-only) evaluation?"
+> What would you like to do?
+> - Quick (recommended) - API-only, nothing cloned, safest option
+> - Medium/Full (researcher mode) - I'll run static analysis / sandbox inside Windows Sandbox, but you accept the AV/EDR risk
+> - Cancel"
 
-If the user wants to proceed: default them to Quick regardless of what they choose, and note the override in the report. Do not offer Medium or Full for repos flagged as offensive tooling.
+If the user chooses Quick: proceed normally.
+
+If the user chooses Medium or Full (researcher override):
+- Ask once more: "Confirmed - you want Medium/Full on offensive tooling? This may trigger AV on your machine. Yes / No"
+- If confirmed: proceed with chosen tier, note "Researcher override - offensive repo scanned at [tier]" in the report header
+- If not confirmed: fall back to Quick
+
+If the user cancels: stop and say "Evaluation cancelled."
 
 **VirusTotal binary pre-scan (all tiers, GitHub targets only):**
 
@@ -274,9 +355,22 @@ Then ask:
 
 > "How thorough should I be?
 >
-> - **Quick**  I'll read the most important files via the GitHub API (entry points, install scripts, anything that runs at startup) and look for red flags using my own analysis. Nothing is cloned to your machine. No external tools needed. Takes about a minute.
-> - **Medium**  I'll do a full static analysis using semgrep, bandit, trufflehog, and gitleaks  all running inside Windows Sandbox so nothing from the target touches your machine. Requires Windows Sandbox (built into Windows 10/11 Pro). Takes a few minutes.
-> - **Full**  Everything in Medium, plus I'll run the software inside the sandbox and watch what it actually does (network connections, files touched, whether it tries to persist). Requires Windows Sandbox, Wireshark, and Sysinternals. If any of these aren't installed, I'll walk you through it."
+Before presenting the tier menu, detect the platform:
+```bash
+uname -s 2>/dev/null || echo "Windows"
+```
+
+**On Windows**, present all three tiers:
+
+> - **Quick** - I'll read the most important files via the GitHub API (entry points, install scripts, anything that runs at startup) and look for red flags. Nothing is cloned to your machine. No external tools needed. Takes about a minute.
+> - **Medium** - Full static analysis using semgrep, bandit, trufflehog, and gitleaks - all running inside Windows Sandbox. Nothing from the target touches your machine. Requires Windows Sandbox (built into Windows 10/11 Pro). Takes a few minutes.
+> - **Full** - Everything in Medium, plus I'll run the software inside the sandbox and watch what it actually does: network connections, files touched, persistence attempts. Requires Windows Sandbox, Wireshark, and Sysinternals. I'll walk you through anything missing.
+
+**On Linux/Mac**, present only Quick and Medium (Docker-based), and explicitly note Full is unavailable:
+
+> - **Quick** - I'll read the most important files via the GitHub API and look for red flags. Nothing is cloned to your machine. No external tools needed. Takes about a minute.
+> - **Medium** - Full static analysis using semgrep, bandit, trufflehog, and gitleaks - running inside Docker so nothing from the target touches your machine. Requires Docker. Takes a few minutes.
+> - **Full - not available on Linux/Mac** - Full mode requires Windows Sandbox and Sysinternals (Windows only). To get runtime behavior analysis, run this scan on a Windows machine.
 
 **After the user chooses a tier, run dependency checks before doing anything else:**
 
@@ -800,6 +894,26 @@ If the target has no Python or Node manifest files: "No Python/Node dependency m
 
 If audit tools were unavailable and no output file exists, manually check dependencies visible in Phase 2a GitHub API reads and flag any known to have had critical CVEs (e.g. `log4j`, `lodash < 4.17.21`, `requests < 2.20.0`).
 
+**NVD API - CVE lookup for non-pip/npm dependencies (C++ libs, system packages, Go modules, etc.):**
+
+For dependencies that pip-audit and npm audit don't cover, query the NIST NVD API directly. Free, no key required (rate-limited to 5 req/30s without key; optional `NVD_API_KEY` raises limit to 50 req/30s).
+
+```bash
+# Look up CVEs for a specific package + version
+curl -s "https://services.nvd.nist.gov/rest/json/cves/2.0?keywordSearch=<package-name>&keywordExactMatch" \
+  | grep -o '"id":"CVE-[^"]*"\|"baseScore":[0-9.]*\|"baseSeverity":"[^"]*"'
+```
+
+Use this for:
+- C/C++ libraries referenced in CMakeLists.txt, conanfile.txt, vcpkg.json
+- Go modules in go.mod
+- Rust crates in Cargo.toml (if cargo-audit isn't available)
+- System package deps referenced in Dockerfile or install scripts
+
+Rate limit: pause 6 seconds between requests without NVD_API_KEY. Cap at 20 lookups per scan to avoid excessive delay. If NVD_API_KEY is set, no pause needed up to 50 req/30s.
+
+Report NVD findings the same way as pip/npm CVEs: package name, CVE ID, severity score, brief description.
+
 Save state after 2e completes.
 
 ### 2f. License compliance
@@ -1169,11 +1283,37 @@ Write the report to `~/canary-reports/<target-name>-<date>-canary-report.md`
 Format for plain-text readability  no markdown tables, no `---` dividers, no heavy bold syntax. The report must look clean when viewed as raw text in an editor, not just when rendered.
 
 
-**Verdict selection (internal  do not write this block into the report):**
-- Safe: no significant findings; normal use path is low risk
-- Caution: notable findings the user should review; risks are manageable with care
-- Unsafe (hidden threat): malicious behavior found  C2, credential theft, auto-execution
-- Unsafe (dangerous by design): normal use path exposes serious risk without a hidden backdoor  exploit collections, C2 tools, repos where AV triggers on clone. Make the distinction explicit in the report.
+**Verdict selection (internal - do not write this block into the report):**
+
+Apply the FIRST matching rule from top to bottom:
+
+1. [X] Unsafe - Hidden threat
+   Signs: C2 callbacks, credential harvesting, persistence without disclosure, obfuscated
+   payloads, backdoors, auto-exfil. The software does something harmful the user didn't
+   agree to. Normal use path IS the attack.
+   Example: a "tool" that silently exfiltrates files on install.
+
+2. [X] Unsafe - Dangerous by design
+   Signs: the software's intended purpose is inherently dangerous -- exploit collections,
+   C2 frameworks, keyloggers, RATs, unverified binaries with AV detections, repos where
+   cloning alone triggers EDR. No hidden behavior -- the danger IS the purpose.
+   Example: helloexp/0day (exploit collection), a published RAT, a PoC for an unpatched CVE.
+   Key distinction from hidden threat: a security researcher could have a legitimate use
+   for this. The risk is in what it IS, not what it's hiding.
+   Report must say: "[X] Unsafe - Dangerous by Design" and explain WHY (not just "malicious").
+
+3. [!] Caution
+   Signs: notable findings -- unverified binaries, outbound connections to undocumented
+   domains, hardcoded keys, missing tests, supply chain risks -- but no evidence of
+   intentional harm. Risks are real but manageable with care.
+   Example: a useful tool that phones home, has unpinned deps, or ships a pre-built binary.
+
+4. [OK] Safe
+   No significant findings. Normal use path is low risk. Minor issues (INFO/LOW) are
+   acceptable and noted but don't change the verdict.
+
+Never use [!] Caution for something that is clearly [X] Unsafe. An exploit collection
+is not "use with caution" -- it is unsafe. The verdict must match the actual risk level.
 
 ```
 # Canary Security Report: <target>
@@ -1184,7 +1324,7 @@ Evaluation: <Quick / Medium / Full>  Static Analysis
 Tool: Canary v2.8
 
 
-## Verdict: [OK] Safe / [!] Caution / [X] Unsafe
+## Verdict: [OK] Safe / [!] Caution / [X] Unsafe - Hidden Threat / [X] Unsafe - Dangerous by Design
 
 
 One or two plain-English sentences summarizing the verdict and the key reason for it.
