@@ -358,9 +358,9 @@ Separate Windows OS baseline traffic (WindowsUpdate, OCSP, licensing) from targe
 
 **PID chain analysis** — the network log shows *where* connections went; the PID chain shows *who made them*. This catches process injection, LOL-bins, and unexpected child process spawning.
 
-If `analyze-pid-chain.ps1` is available at `C:\sandbox-eval-repo\scripts\`:
+If `analyze-pid-chain.ps1` is available at `C:\sandbox\scripts\`:
 ```powershell
-powershell -ExecutionPolicy Bypass -File C:\sandbox-eval-repo\scripts\analyze-pid-chain.ps1 `
+powershell -ExecutionPolicy Bypass -File C:\sandbox\scripts\analyze-pid-chain.ps1 `
     -PmlFile C:\sandbox\output\procmon-internal-<timestamp>.pml
 ```
 
