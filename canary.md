@@ -225,6 +225,45 @@ If more than 10 binaries exist: scan the 10 largest, note count of unscanned in 
 If `VT_API_KEY` is not set and binaries are found:
 > "This path contains [N] binaries (.exe, .dll, etc.) that I can't verify without VirusTotal. Set `VT_API_KEY` to check them against 70+ AV engines. Continuing without binary hash checks."
 
+**VirusTotal package scan (all tiers, pip/npm targets only):**
+
+For pip and npm targets, fetch the package download URL from the registry and submit to VT. The registry APIs are public — no auth needed.
+
+**pip:**
+```bash
+# Get latest wheel or sdist download URL from PyPI
+curl -s https://pypi.org/pypi/<package>/json | \
+  grep -o '"url":"https://files.pythonhosted.org/[^"]*\.whl"' | head -1
+# Fallback to sdist if no wheel:
+curl -s https://pypi.org/pypi/<package>/json | \
+  grep -o '"url":"https://files.pythonhosted.org/[^"]*\.tar\.gz"' | head -1
+```
+
+**npm:**
+```bash
+# Get tarball URL from npmjs registry
+curl -s https://registry.npmjs.org/<package>/latest | grep -o '"tarball":"[^"]*"'
+```
+
+Once the URL is found, submit it to VT exactly as in the GitHub URL scan:
+```powershell
+$encoded = [uri]::EscapeDataString($packageUrl)
+$submit = Invoke-RestMethod -Uri "https://www.virustotal.com/api/v3/urls" -Method POST `
+    -Headers @{"x-apikey" = $env:VT_API_KEY} `
+    -Body "url=$encoded" -ContentType "application/x-www-form-urlencoded"
+$analysisId = $submit.data.id
+Start-Sleep -Seconds 20
+$result = Invoke-RestMethod -Uri "https://www.virustotal.com/api/v3/analyses/$analysisId" `
+    -Headers @{"x-apikey" = $env:VT_API_KEY}
+$stats = $result.data.attributes.stats
+```
+
+Same reporting thresholds: `malicious > 0` → CRITICAL (stop and warn), `suspicious > 0` → HIGH, clean → note engine count.
+
+If the registry API call fails or returns no download URL: note it as a limitation and continue.
+
+If `VT_API_KEY` is not set: skip silently — no binary warning needed here since the user is evaluating a named package, not dropping a mystery binary on their machine.
+
 **Tell the user:**
 
 > "Canary v2.8 — use at your own risk. Canary reduces risk but does not guarantee safety. Use your own judgment before installing any software.
