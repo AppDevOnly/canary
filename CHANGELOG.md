@@ -14,6 +14,33 @@
 - Plain-English feedback when watchdog retries ("The sandbox stopped responding — restarting. Attempt N of 2.")
 - Autoruns baseline (autoruns-before.csv) and after-snapshot (autoruns-after.csv) integrated into run-watchdog.ps1 — persistence detection is now fully automated
 - Dynamic tshark Wi-Fi interface detection — no longer hardcoded as interface 6
+- setup-template.ps1: base template for Full mode sandbox setup scripts; canary fills in target-specific placeholders (TARGET_NAME, TARGET_URL, BINARY_NAME, EXTRACT_DIR, LAUNCH_ARGS) rather than generating setup.ps1 from scratch each time
+
+### Changed
+- Sandbox timeouts reduced: SetupTimeout 150s → 60s, StallTimeout 300s → 90s, Interactive 3600s → 600s, MaxRetries 3 → 2
+- Quick scan description clarified: explicitly states it uses Claude's built-in analysis only, no external tools
+- Dependency checks happen before the consent block, not after — user sees what's missing before committing to the scan
+- Tool install flow improved: pip/winget availability checked before attempting tool installs
+
+### Fixed
+- Silent failure when gh auth not configured for GitHub targets in Quick/Medium scans
+- tshark Wi-Fi interface hardcoded as 6 — wrong on machines with different NIC ordering
+- Autoruns not automated — was described in canary.md but not wired into watchdog
+
+## v2.5 (2026-03-19)
+
+### Added
+- Per-level dependency checks: Quick, Medium, and Full each verify exactly the tools they need before starting — no assumptions
+- pip/Python availability check before attempting any pip installs
+- winget availability check before attempting any winget installs
+- Admin rights check for Full mode (required for Procmon, tshark, SAC registry)
+- Scan state persistence: progress saved to ~/canary-reports/<target>-state.json after each phase completes
+- Resume logic: /canary <target> detects partial scans and offers to continue from where it left off; SAC state restored if scan was interrupted mid-sandbox
+- Progress messages at every phase transition ("Starting secrets scan...", "Secrets scan complete — 0 findings")
+- 30-second heartbeat during long-running operations (semgrep, sandbox wait)
+- Plain-English feedback when watchdog retries ("The sandbox stopped responding — restarting. Attempt N of 2.")
+- Autoruns baseline (autoruns-before.csv) and after-snapshot (autoruns-after.csv) integrated into run-watchdog.ps1 — persistence detection is now fully automated
+- Dynamic tshark Wi-Fi interface detection — no longer hardcoded as interface 6
 
 ### Changed
 - Sandbox timeouts reduced: SetupTimeout 150s → 60s, StallTimeout 300s → 90s, Interactive 3600s → 600s, MaxRetries 3 → 2
