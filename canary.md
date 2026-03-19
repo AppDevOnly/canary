@@ -189,6 +189,42 @@ If `VT_API_KEY` is not set and binaries are found:
 
 If no binaries found: skip this step silently.
 
+**VirusTotal binary hash check (all tiers, local path targets only):**
+
+For local path targets, scan binaries on disk using SHA256 hash lookups — no upload, no URL needed. VT returns results instantly if the hash is known (most public software is indexed).
+
+```powershell
+$binaryExtensions = @('*.exe','*.dll','*.msi','*.bin','*.so','*.dylib','*.pkg','*.deb','*.rpm')
+$binaries = $binaryExtensions | ForEach-Object {
+    Get-ChildItem -Path $targetPath -Recurse -Filter $_ -ErrorAction SilentlyContinue
+} | Sort-Object Length -Descending | Select-Object -First 10
+
+foreach ($bin in $binaries) {
+    $hash = (Get-FileHash -Algorithm SHA256 -Path $bin.FullName).Hash.ToLower()
+    Write-Host "Checking $($bin.Name) ($hash)..."
+    $result = Invoke-RestMethod -Uri "https://www.virustotal.com/api/v3/files/$hash" `
+        -Headers @{"x-apikey" = $env:VT_API_KEY} -ErrorAction SilentlyContinue
+    if ($result.data.attributes.last_analysis_stats) {
+        $stats = $result.data.attributes.last_analysis_stats
+        # stats.malicious, stats.suspicious, stats.undetected, stats.harmless
+    } else {
+        Write-Host "$($bin.Name): not in VirusTotal database (never submitted — locally built or very new)"
+    }
+    Start-Sleep -Seconds 15  # free tier: 4 req/min
+}
+```
+
+Report findings immediately using the same thresholds as the GitHub binary pre-scan:
+- `malicious > 0` → **CRITICAL** — stop and warn before continuing
+- `suspicious > 0` → **HIGH** — flag with count
+- `malicious = 0, suspicious = 0` → "VirusTotal: clean (N engines)"
+- Hash not found in VT → note as "Not in VT database" — flag as INFO if the binary claims to be a known public tool (mismatch is suspicious); expected for locally compiled code
+
+If more than 10 binaries exist: scan the 10 largest, note count of unscanned in report.
+
+If `VT_API_KEY` is not set and binaries are found:
+> "This path contains [N] binaries (.exe, .dll, etc.) that I can't verify without VirusTotal. Set `VT_API_KEY` to check them against 70+ AV engines. Continuing without binary hash checks."
+
 **Tell the user:**
 
 > "Canary v2.8 — use at your own risk. Canary reduces risk but does not guarantee safety. Use your own judgment before installing any software.
