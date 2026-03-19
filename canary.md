@@ -42,17 +42,38 @@ If already up to date, say so and stop — don't reinstall unnecessarily.
 
 **Always use `gh api <endpoint> --jq '<filter>'` for GitHub API calls and JSON parsing.** Do not use standalone `jq`, `python3`, or `python` for JSON parsing — they are not reliably available on Windows. If you need to parse JSON outside of a `gh api` call, use `grep` or string matching instead.
 
-Before starting the evaluation, check for required tools and offer to install any that are missing. Do not skip silently — pause, walk the user through the install, then resume.
+Canary works best with specialized tools installed. Quick and Medium need very little. Full mode needs more — but canary walks the user through every install. No tool is skipped silently.
+
+### Quick and Medium tools
 
 | Tool | Required for | Install command |
 |------|-------------|-----------------|
 | `gh` | All GitHub targets | `winget install GitHub.cli` (Windows) / `brew install gh` (Mac/Linux) |
-| `pip-audit` | Python dependency audit | `pip install pip-audit` |
-| `npm` | Node dependency audit | Install Node.js from https://nodejs.org |
-| Docker | Full mode (sandbox fallback) | `winget install Docker.DockerDesktop` |
-| Windows Sandbox | Full mode (preferred on Windows) | Enable via "Turn Windows features on or off" → Windows Sandbox |
+| `pip-audit` | Python CVE scanning | `pip install pip-audit` |
+| `npm` | Node CVE scanning | Install Node.js from https://nodejs.org |
+| `semgrep` | Multi-language static analysis | `pip install semgrep` |
+| `bandit` | Python security linting | `pip install bandit` |
+| `trufflehog` | Git history secrets scan | `winget install trufflesecurity.trufflehog` (Windows) / `brew install trufflehog` (Mac) |
+| `gitleaks` | Fast secrets scan | `winget install gitleaks` (Windows) / `brew install gitleaks` (Mac) |
 
-If a tool is missing, say: "I need [tool] to [do X]. Want me to walk you through installing it? It'll take about [time]. Once it's installed I'll pick up right where we left off." Then install, verify, and continue.
+### Full mode tools (sandbox)
+
+| Tool | Required for | Install |
+|------|-------------|---------|
+| Windows Sandbox | Isolated execution environment | Enable via Optional Features → Windows Sandbox (requires reboot) |
+| Sysinternals Suite | Procmon (process monitor) + Autoruns (persistence baseline) | Download from Microsoft, extract to `C:\temp\security-tools\Sysinternals\` |
+| Wireshark / tshark | Network capture | `winget install WiresharkFoundation.Wireshark` |
+| Docker | Sandbox fallback (Linux/Mac) | `winget install Docker.DockerDesktop` |
+
+### Tool install behavior
+
+Full mode requires participation from the user — several tools need to be installed on their machine before the scan can run. This is expected and normal. When a tool is missing:
+
+Tell the user: "Full mode uses several specialized tools to give you a complete picture. Some of these may not be installed yet — I'll check right now and walk you through anything that's missing. Each install takes about a minute and I'll handle it step by step. Once everything's ready I'll run the scan without interrupting you again."
+
+Then for each missing tool: "I need [tool] to [do X]. Want me to walk you through installing it? It'll take about [time]. Once it's installed I'll pick up right where we left off."
+
+Install, verify, and continue. Never skip a tool silently — note it as a limitation in the report if the user declines.
 
 ---
 
@@ -76,8 +97,9 @@ Tailor the consent block to the chosen tier. Use this exact template:
 > - Fetch repo metadata and file tree from GitHub API
 > - Read source files directly from GitHub (no download to your machine)
 > - Search for secrets, hardcoded credentials, and suspicious patterns in the code
-> *(Medium + Full only)* Run `pip-audit` and/or `npm audit` on your machine to check for known CVEs
-> *(Medium + Full only)* Read `~/.claude/settings.json` to check tool availability
+> *(Medium + Full only)* Run `semgrep`, `bandit`, `trufflehog`, and `gitleaks` on your machine for deeper static analysis
+> *(Medium + Full only)* Run `pip-audit` and/or `npm audit` to check dependencies for known CVEs
+> *(Medium + Full only)* Check tool availability — walk you through any missing installs before starting
 > - Write a report to `~/canary-reports/`
 > - Save a note to memory so future sessions know this eval is done
 >
@@ -93,16 +115,28 @@ Wait for a yes before starting. Do not ask for permission again during the evalu
 
 **After the user chooses Full mode, run a preflight check before touching the target:**
 
-Check all tools needed for Full mode in one pass:
-- `gh auth status` — GitHub CLI authenticated
-- `pip-audit --version` — Python dependency audit
-- `npm --version` — Node dependency audit
-- Windows Sandbox: `Get-WindowsOptionalFeature -Online -FeatureName Containers-DisposableClientVM` (PowerShell)
-- Docker: `docker --version`
+Tell the user upfront: "Full mode uses several specialized tools to give you a complete picture. Some of these may not be installed yet — I'll check right now and walk you through anything that's missing. Each install takes about a minute and I'll handle it step by step. Once everything's ready I'll run the scan without interrupting you again."
 
-If anything is missing, handle all installs now before starting Phase 2. Tell the user: "Before I start, let me make sure you have everything needed for a Full evaluation. I found [X] missing. Let's get those installed now so the scan runs uninterrupted."
+Check all tools in one pass:
+```bash
+gh auth status
+pip-audit --version
+npm --version
+semgrep --version
+bandit --version
+trufflehog --version
+gitleaks version
+tshark --version
+```
+```powershell
+Get-WindowsOptionalFeature -Online -FeatureName Containers-DisposableClientVM
+Test-Path 'C:\temp\security-tools\Sysinternals\Procmon64.exe'
+Test-Path 'C:\temp\security-tools\Sysinternals\Autoruns64.exe'
+```
 
-For Quick and Medium, only check `gh` — the other tools aren't needed.
+Handle all missing tools now, before Phase 2. Walk through each install one at a time — confirm it works before moving to the next.
+
+For Quick and Medium, only check `gh`, `pip-audit`, `npm`, `semgrep`, `bandit`, `trufflehog`, and `gitleaks` — sandbox tools aren't needed.
 
 **Before starting, tell the user:**
 
@@ -116,7 +150,7 @@ Then ask:
 >
 > - **Quick** — I'll scan the most important files (entry points, install scripts, anything that runs at startup) for red flags. Takes about a minute.
 > - **Medium** — I'll read the full codebase, check all dependencies for known security vulnerabilities, scan for accidentally committed secrets, and assess code quality. Takes a few minutes.
-> - **Full** — Everything in Medium, plus I'll run it in an isolated sandbox and watch what it actually does on your machine (what network connections it makes, what files it touches, whether it tries to persist anything). Takes longer and requires Windows Sandbox or Docker."
+> - **Full** — Everything in Medium, plus I'll run it in an isolated sandbox and watch what it actually does on your machine (what network connections it makes, what files it touches, whether it tries to persist anything). Takes longer and requires Windows Sandbox, Wireshark, and Sysinternals. If any of these aren't installed, I'll walk you through it — each takes about a minute."
 
 ---
 
@@ -144,11 +178,43 @@ Flag these patterns (rate each CRITICAL / HIGH / MEDIUM / LOW / INFO):
 - `install_requires` with no version pins — **MEDIUM** (unpinned deps allow supply chain attacks)
 - `__import__` / dynamic imports — **MEDIUM** (can obfuscate what's loaded)
 
-### 2b. Secrets scan
+### 2b. Semgrep static analysis
 
 **Medium and above only.**
 
-Search for patterns indicating hardcoded secrets:
+If semgrep is available, run against the local clone or downloaded source:
+```bash
+semgrep --config=auto --json 2>/dev/null | grep -i "severity\|message\|path\|line"
+```
+
+Focus on HIGH and CRITICAL findings. Skip INFO-level noise. If semgrep isn't available, note it in the report and rely on manual code inspection.
+
+### 2c. Bandit (Python projects only)
+
+**Medium and above only.**
+
+If the project is Python and bandit is available:
+```bash
+bandit -r . -f json 2>/dev/null | grep -i "issue_severity\|issue_text\|filename\|line_number"
+```
+
+Flag HIGH and MEDIUM severity findings. Cross-reference with manual code inspection — bandit has false positives.
+
+### 2d. Secrets scan
+
+**Medium and above only.**
+
+If trufflehog is available, scan git history for secrets (catches things committed then deleted):
+```bash
+trufflehog git file://. --json 2>/dev/null | head -100
+```
+
+If gitleaks is available, run a fast secrets scan:
+```bash
+gitleaks detect --source . --report-format json 2>/dev/null | head -100
+```
+
+If neither is available, manually search for patterns:
 - Long random strings adjacent to words: key, token, secret, password, api, auth
 - AWS key patterns: `AKIA[0-9A-Z]{16}`
 - Private key headers: `-----BEGIN (RSA|EC|DSA|OPENSSH) PRIVATE KEY-----`
@@ -156,7 +222,7 @@ Search for patterns indicating hardcoded secrets:
 
 Report any matches with file + line number. Rate HIGH if found in committed source. Do NOT print the full value — show first 8 chars + `...`
 
-### 2c. Dependency audit
+### 2e. Dependency audit
 
 **Medium and above only.**
 
@@ -174,7 +240,7 @@ If audit tools aren't available, manually check top-level dependencies and flag 
 - More than 2 major versions behind latest
 - Known to have had critical CVEs (e.g. `log4j`, `lodash < 4.17.21`, `requests < 2.20.0`)
 
-### 2d. License compliance
+### 2f. License compliance
 
 **Medium and above only.**
 
@@ -216,6 +282,18 @@ Rate each finding CRITICAL / HIGH / MEDIUM / LOW / INFO.
 **Important:** Before running anything from the target, warn the user if static analysis already found serious issues (CRITICAL findings). Give them the option to stop here rather than run potentially hostile code even in a sandbox.
 
 If Windows Sandbox is available:
+
+**Autoruns baseline — run before launching the sandbox:**
+
+```powershell
+$autorunsExe = 'C:\temp\security-tools\Sysinternals\Autoruns64.exe'
+if (Test-Path $autorunsExe) {
+    & $autorunsExe /accepteula /a * /x /c C:\sandbox\output\autoruns-before.csv
+    Write-Host "Autoruns baseline saved."
+}
+```
+
+After the sandbox run, take a second snapshot and diff the two to detect any persistence the software attempted to install. Flag any new entries as HIGH.
 
 **Pre-flight: check Smart App Control (SAC) state before launching.**
 
