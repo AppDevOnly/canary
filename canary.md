@@ -310,15 +310,55 @@ Flag any new entries as HIGH — they represent persistence the software attempt
 **Pre-flight: check Smart App Control (SAC) state before launching.**
 
 ```powershell
-powershell -NoProfile -Command "(Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\CI\Policy' -ErrorAction SilentlyContinue).VerifiedAndReputablePolicyState"
+$sacState = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\CI\Policy' -ErrorAction SilentlyContinue).VerifiedAndReputablePolicyState
 ```
 
 - `0` = Off — proceed normally
-- `1` = Evaluation mode — unsigned binaries may be blocked; warn the user
-- `2` = On — unsigned binaries **will** be blocked; warn the user that dynamic analysis results may be limited
+- `1` = Evaluation mode — will block unsigned binaries
+- `2` = On — will block unsigned binaries
+- `$null` = key not present — SAC not active, proceed normally
 
-If SAC is On or Evaluation, tell the user:
-> "Smart App Control is active on your machine. This may prevent unsigned binaries from running inside the sandbox. I'll attempt to disable it for the sandbox session, but if the binary is blocked, I'll note it as a finding and write the report based on static analysis."
+If SAC is 1 or 2, present this consent prompt before doing anything else:
+
+> "To run this software in the sandbox, I need to temporarily disable Smart App Control on your machine.
+>
+> **What that means in plain English:** Smart App Control is a Windows security feature that blocks unsigned software from running. Disabling it means Windows will be slightly more permissive for a few minutes while the scan runs. This affects your whole machine, not just the sandbox.
+>
+> **Why it's still safe:** The software itself runs inside an isolated sandbox — it can't touch your files, your browser, or anything on your main system. I'm only disabling SAC so Windows will allow it to launch inside that container. Once the scan finishes, I'll re-enable it and show you exactly how to verify it's back on.
+>
+> **Your options:**
+> - **Yes, proceed** — I'll disable SAC, run the scan, and re-enable it when done
+> - **No, skip sandbox** — I'll write the report based on static analysis only and clearly note that runtime behavior wasn't observed
+>
+> What would you like to do?"
+
+Wait for explicit confirmation before touching SAC. If the user says no, skip to Phase 5 and note in the Sandbox Results section: "User declined to disable Smart App Control. Runtime analysis was not performed. Results are based on static analysis only."
+
+If the user says yes, disable SAC and **spawn a new PowerShell process** to pick up the change — the registry update only takes effect in a new session:
+
+```powershell
+# Disable SAC
+Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\CI\Policy' `
+    -Name VerifiedAndReputablePolicyState -Value 0 -Type DWord -Force
+
+# Verify it took
+$check = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\CI\Policy').VerifiedAndReputablePolicyState
+Write-Host "SAC state now: $check (0 = Off)"
+```
+
+Record the original SAC state so you can restore it after the scan. All sandbox launch commands must be run in a **new** PowerShell process (via `Start-Process powershell`) so the policy change is in effect — not in the same session that changed the registry.
+
+After the sandbox run completes (success or failure), **always re-enable SAC** if it was active before:
+
+```powershell
+Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\CI\Policy' `
+    -Name VerifiedAndReputablePolicyState -Value $sacState -Type DWord -Force
+Write-Host "Smart App Control restored to original state ($sacState)."
+```
+
+Then tell the user:
+
+> "Smart App Control has been re-enabled. To verify: open Windows Security > App & browser control > Smart App Control — it should show its previous setting. If you want to confirm via PowerShell: `(Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\CI\Policy').VerifiedAndReputablePolicyState` should return $sacState."
 
 Before launching, warn the user:
 
@@ -414,11 +454,11 @@ $template | Out-File $wsbPath -Encoding UTF8 -Force
 - **Interactive** — use `-StallTimeoutSec 3600`. Prevents watchdog from killing the sandbox while the user is reading output or typing between commands.
 
 ```powershell
-# Automated (default)
-powershell -NoExit -File C:\sandbox\scripts\run-watchdog.ps1 -WsbFile $wsbPath
+# Automated (default) — new process so SAC policy change is in effect
+Start-Process powershell -ArgumentList "-NoExit -ExecutionPolicy Bypass -File C:\sandbox\scripts\run-watchdog.ps1 -WsbFile `"$wsbPath`"" -WindowStyle Normal
 
 # Interactive
-powershell -NoExit -File C:\sandbox\scripts\run-watchdog.ps1 -WsbFile $wsbPath -StallTimeoutSec 3600
+Start-Process powershell -ArgumentList "-NoExit -ExecutionPolicy Bypass -File C:\sandbox\scripts\run-watchdog.ps1 -WsbFile `"$wsbPath`" -StallTimeoutSec 3600" -WindowStyle Normal
 ```
 
 Monitor `C:\sandbox\output\stream.log` in real time. Report progress to the user as it streams.
@@ -514,6 +554,17 @@ If this was a Quick evaluation, write: "Not evaluated — run a Medium or Full e
 Only include this section for Full evaluations. Describe what the code actually did when run:
 network connections observed, files created or modified, processes spawned, anything unexpected.
 If this was a Quick or Medium evaluation, write: "Not evaluated — run a Full evaluation to observe runtime behavior."
+
+If SAC was disabled for this scan, always include:
+"Smart App Control was active on this machine (state: [0/1/2]) before this evaluation.
+It was temporarily disabled to allow the unsigned binary to run in the sandbox, then
+re-enabled immediately after. This is a normal step for evaluating unsigned software.
+To verify SAC is back on: Windows Security > App & browser control > Smart App Control."
+
+If the user declined to disable SAC, write:
+"Runtime analysis was not performed — Smart App Control was active and the user chose
+not to disable it. Results above are based on static analysis only. To get runtime
+behavior data, re-run as Full and allow SAC to be temporarily disabled."
 
 
 ## Bugs Found
