@@ -37,6 +37,28 @@ curl -sSL https://raw.githubusercontent.com/AppDevOnly/canary/main/install.sh | 
 
 **Requirements:** [Claude Code](https://github.com/anthropics/claude-code) must be installed first.
 
+### Verify the installer before running (optional but recommended)
+
+The `irm | iex` pattern runs a remote script directly. If you want to verify it first:
+
+```powershell
+# Download without running
+Invoke-WebRequest https://raw.githubusercontent.com/AppDevOnly/canary/main/install.ps1 -OutFile install.ps1
+
+# Verify SHA256 matches the value below
+(Get-FileHash install.ps1 -Algorithm SHA256).Hash.ToLower()
+
+# If it matches, run it
+powershell -ExecutionPolicy Bypass -File install.ps1
+```
+
+**Current SHA256 hashes:**
+```
+install.ps1   22f9c0092faf19ba36a1aa7dcdc35226dc8735c3c1cbeb0cdd4a6115f1c10ed4
+```
+
+> ⚠️ The main risk with `irm | iex` is a compromised AppDevOnly account — a supply chain attack could replace install.ps1 with something malicious. Verifying the hash guards against that. Hashes are updated with each release.
+
 The installer:
 - Copies `canary.md` into `~/.claude/commands/` so `/canary` is available in Claude Code
 - Deploys sandbox infrastructure to `C:\sandbox\scripts\` (Windows only)

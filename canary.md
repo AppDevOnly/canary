@@ -1,4 +1,4 @@
----
+﻿---
 description: Evaluate code for security issues, dependency vulnerabilities, bugs, and quality problems before installing
 version: 2.8
 ---
@@ -65,6 +65,25 @@ tshark / Wireshark    —            —                 required
 Canary sandbox scripts—            required          required
 ```
 
+### Tool manifest
+
+Single source of truth for all tool dependencies. Dep check sections use this for install commands and version requirements.
+
+| Tool | Purpose | Tier | Windows | Mac/Linux | Min ver | Notes |
+|---|---|---|---|---|---|---|
+| gh | GitHub API | Quick+ | `winget install GitHub.cli` | `brew install gh` | any | Needs `gh auth login` |
+| semgrep | SAST | Medium+ | `pip install semgrep` | `pip install semgrep` | any | First run 30–60s (rule download) |
+| bandit | Python SAST | Medium+ | `pip install bandit` | `pip install bandit` | any | Python projects only |
+| trufflehog | Secrets scan | Medium+ | Binary from github.com/trufflesecurity/trufflehog/releases | `brew install trufflehog` | **3.x** | ⚠️ NOT winget or pip — both install v2.x |
+| gitleaks | Secrets scan | Medium+ | `winget install gitleaks` or binary | `brew install gitleaks` | any | |
+| pip-audit | Python CVEs | Medium+ | `pip install pip-audit` | `pip install pip-audit` | any | |
+| npm audit | Node CVEs | Medium+ | nodejs.org installer | `brew install node` | any | Skipped if no package.json |
+| tshark | Network capture | Full | `winget install WiresharkFoundation.Wireshark` | `brew install wireshark` | any | Requires Npcap (bundled on Windows) |
+| Windows Sandbox | Isolation | Medium+ | `Enable-WindowsOptionalFeature -Online -FeatureName Containers-DisposableClientVM` | N/A | any | Requires reboot; Pro/Enterprise only |
+| Sysinternals | Process monitor | Full | Download suite, extract to `C:\temp\security-tools\Sysinternals\` | N/A | any | Needs Procmon64.exe + autorunsc64.exe |
+| Canary scripts | Sandbox orchestration | Medium+ | Deployed by install.ps1 to `C:\sandbox\scripts\` | N/A | any | Reinstall: `irm .../install.ps1 \| iex` |
+| VT_API_KEY | Binary AV checks | All (optional) | `$env:VT_API_KEY = 'key'` | `export VT_API_KEY=key` | N/A | Free: 500 req/day — virustotal.com |
+
 ### Tool install behavior
 
 No tool is ever skipped silently. When a tool is missing, tell the user exactly what it is, what it's needed for, and offer to install it. If the user declines, note it as a limitation in the report. Never proceed assuming a tool is there when you haven't checked.
@@ -106,11 +125,20 @@ If no state file exists, proceed normally.
 
 ## Phase 1 — Identify the target
 
+
 Parse `<target>`:
-- **GitHub URL** â†’ fetch repo contents via GitHub API (no clone needed for static analysis)
-- **Local path** â†’ read files directly
-- **`pip:<name>`** â†’ fetch from PyPI: source tarball or wheel, read metadata + scripts
-- **`npm:<name>`** â†’ fetch from npmjs: read package.json, scripts, index
+- **GitHub URL** (`https://github.com/...`) → fetch repo contents via GitHub API (no clone needed for static analysis)
+- **Local path** (`/path/to/project` or `~/foo`) → read files directly
+- **`pip:<name>`** → fetch from PyPI: source tarball or wheel, read metadata + scripts
+- **`npm:<name>`** → fetch from npmjs: read package.json, scripts, index
+- **`cargo:<name>`** → fetch from crates.io: read Cargo.toml, src/lib.rs, src/main.rs
+- **`nuget:<name>`** → fetch from nuget.org: read .nuspec and package metadata
+- **GitLab URL** (`https://gitlab.com/...`) → use GitLab API (`https://gitlab.com/api/v4/projects/<encoded-path>/repository/tree`); requires `GITLAB_TOKEN` env var for private repos
+- **Bitbucket URL** (`https://bitbucket.org/...`) → use Bitbucket API (`https://api.bitbucket.org/2.0/repositories/<owner>/<slug>/src`); requires `BITBUCKET_TOKEN` for private repos
+- **Docker Hub** (`docker:<image>`) → fetch image metadata and check base image CVEs via Docker Hub API
+- **VS Code extension** (`vscode:<publisher.name>`) → fetch from VS Code Marketplace API, check manifest and scripts
+
+If the target format is unrecognized, tell the user the supported formats and ask them to clarify.
 
 If no target is provided, ask the user what they'd like to evaluate and explain the supported formats.
 
