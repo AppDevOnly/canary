@@ -1,26 +1,29 @@
 # run-watchdog.ps1
 # Self-healing sandbox launcher with real-time log streaming.
 # Replaces start-monitors.ps1 as the single entry point for a test run.
-# - Starts Procmon + tshark on host
+# - Takes Autoruns baseline before sandbox launch
+# - Starts Procmon + tshark on host (Wi-Fi interface detected dynamically)
 # - Launches sandbox
 # - Streams setup.log and pipeline.log to stream.log in real time
-# - Detects stalls (no log activity) and mapped-folder failures, kills and restarts
+# - Detects stalls and mapped-folder failures, kills and restarts
+# - Takes Autoruns after-snapshot at teardown for persistence diff
 # - Up to $MaxRetries attempts before giving up
 
 param(
-    [int]$MaxRetries        = 3,
-    [int]$SetupTimeoutSec   = 150,   # Max wait for setup.log to appear after sandbox launch
-    [int]$StallTimeoutSec   = 300,   # Max silence before declaring a stall mid-run
+    [int]$MaxRetries        = 2,
+    [int]$SetupTimeoutSec   = 60,    # Max wait for setup.log to appear after sandbox launch
+    [int]$StallTimeoutSec   = 90,    # Max silence before declaring a stall mid-run
     [string]$WsbFile        = 'C:\sandbox\sandbox.wsb',  # Path to the .wsb config for this run
     [switch]$SkipClean,              # Preserve previous pcap/procmon files
-    [switch]$Interactive             # Keep streaming after pipeline completes (for interactive sessions with multiple runs)
+    [switch]$Interactive             # Keep streaming after pipeline completes (for interactive sessions)
 )
 
 $ErrorActionPreference = 'Continue'
-$OutputDir  = 'C:\sandbox\output'
-$StreamLog  = "$OutputDir\stream.log"
-$ProcmonExe = 'C:\temp\security-tools\Sysinternals\Procmon64.exe'
-$TsharkExe  = 'C:\Program Files\Wireshark\tshark.exe'
+$OutputDir    = 'C:\sandbox\output'
+$StreamLog    = "$OutputDir\stream.log"
+$ProcmonExe   = 'C:\temp\security-tools\Sysinternals\Procmon64.exe'
+$AutorunsExe  = 'C:\temp\security-tools\Sysinternals\autorunsc64.exe'
+$TsharkExe    = 'C:\Program Files\Wireshark\tshark.exe'
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -34,11 +37,9 @@ function Log {
 function Stop-Sandbox {
     Log 'Stopping sandbox processes...' 'watchdog' 'Yellow'
 
-    # Try graceful Stop-Process first
     Get-Process -Name 'WindowsSandboxServer','WindowsSandboxRemoteSession','WindowsSandboxClient' `
         -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 
-    # If still alive after 10s, force-kill via taskkill (handles hung/zombie states)
     Start-Sleep -Seconds 3
     $stubborn = Get-Process -Name 'WindowsSandboxServer','WindowsSandboxRemoteSession','WindowsSandboxClient' `
         -ErrorAction SilentlyContinue
@@ -48,8 +49,6 @@ function Stop-Sandbox {
         Start-Sleep -Seconds 3
     }
 
-    # Wait up to 20s for vmmemWindowsSandbox to release (Hyper-V kernel process, unkillable directly)
-    # Hard exit after deadline — don't hang indefinitely on stale VM state
     $deadline = (Get-Date).AddSeconds(20)
     while ((Get-Date) -lt $deadline) {
         if (-not (Get-Process vmmemWindowsSandbox -ErrorAction SilentlyContinue)) { break }
@@ -68,6 +67,23 @@ function Stop-Monitors {
     Start-Sleep -Seconds 2
 }
 
+function Get-TsharkWifiInterface {
+    # Detect Wi-Fi interface number dynamically — do not hardcode
+    $ifaces = & $TsharkExe -D 2>&1
+    # Try common Wi-Fi adapter name patterns
+    $wifi = $ifaces | Select-String -Pattern 'Wi-Fi|WiFi|Wireless|wlan|802\.11' | Select-Object -First 1
+    if ($wifi) {
+        $ifNum = ($wifi.ToString() -split '\.')[0].Trim()
+        Log "Detected Wi-Fi interface: $ifNum ($($wifi.ToString().Trim()))" 'watchdog' 'Green'
+        return $ifNum
+    }
+    # Fallback: list all interfaces so the user can see what's available
+    Log 'WARNING: Could not auto-detect Wi-Fi interface. Available interfaces:' 'watchdog' 'Yellow'
+    $ifaces | ForEach-Object { Log "  $_" 'watchdog' 'Yellow' }
+    Log 'Skipping Wi-Fi capture. vSwitch capture will still run.' 'watchdog' 'Yellow'
+    return $null
+}
+
 function Start-Monitors {
     param([string]$ts)
 
@@ -77,22 +93,24 @@ function Start-Monitors {
     Log "Procmon -> $pml" 'watchdog' 'Green'
     Start-Sleep -Seconds 2
 
-    # tshark Wi-Fi (interface 6) — pcap ring + text
-    Start-Process $TsharkExe `
-        -ArgumentList "-i 6 -w $OutputDir\capture-wifi-$ts.pcapng -b duration:300 -b files:3" `
-        -WindowStyle Hidden -RedirectStandardError "$OutputDir\tshark-err.log"
-    Start-Process $TsharkExe `
-        -ArgumentList "-i 6 -T fields -e frame.time -e ip.src -e ip.dst -e dns.qry.name -e tcp.dstport -Y `"dns or tcp.flags.syn==1`" -E separator=| -l" `
-        -WindowStyle Hidden `
-        -RedirectStandardOutput "$OutputDir\network.log" `
-        -RedirectStandardError  "$OutputDir\network-err.log"
-    Log 'tshark Wi-Fi started.' 'watchdog' 'Green'
+    # tshark Wi-Fi — detect interface dynamically
+    $wifiIf = Get-TsharkWifiInterface
+    if ($wifiIf) {
+        Start-Process $TsharkExe `
+            -ArgumentList "-i $wifiIf -w $OutputDir\capture-wifi-$ts.pcapng -b duration:300 -b files:3" `
+            -WindowStyle Hidden -RedirectStandardError "$OutputDir\tshark-err.log"
+        Start-Process $TsharkExe `
+            -ArgumentList "-i $wifiIf -T fields -e frame.time -e ip.src -e ip.dst -e dns.qry.name -e tcp.dstport -Y `"dns or tcp.flags.syn==1`" -E separator=| -l" `
+            -WindowStyle Hidden `
+            -RedirectStandardOutput "$OutputDir\network.log" `
+            -RedirectStandardError  "$OutputDir\network-err.log"
+        Log 'tshark Wi-Fi started.' 'watchdog' 'Green'
+    }
 }
 
 function Start-Sandbox-And-VSwitch {
     param([string]$ts)
 
-    # Check no existing sandbox instance
     $existing = Get-Process -Name 'WindowsSandboxRemoteSession','WindowsSandboxClient','WindowsSandboxServer' -ErrorAction SilentlyContinue
     if ($existing) {
         Log 'ERROR: Existing sandbox instance detected. Stopping it first.' 'watchdog' 'Red'
@@ -102,14 +120,12 @@ function Start-Sandbox-And-VSwitch {
     Log 'Launching sandbox...' 'watchdog' 'Green'
     Start-Process $WsbFile
 
-    # Wait for sandbox process to appear (60s)
     $deadline = (Get-Date).AddSeconds(60)
     while ((Get-Date) -lt $deadline) {
         if (Get-Process -Name 'WindowsSandboxRemoteSession','WindowsSandboxClient' -ErrorAction SilentlyContinue) { break }
         Start-Sleep -Seconds 2
     }
 
-    # Poll for vEthernet (Default Switch) NIC (60s)
     Log 'Waiting for sandbox NIC...' 'watchdog'
     $deadline = (Get-Date).AddSeconds(60)
     $nicUp = $false
@@ -119,7 +135,7 @@ function Start-Sandbox-And-VSwitch {
         Start-Sleep -Seconds 2
     }
     if (-not $nicUp) { Log 'WARNING: vEthernet (Default Switch) not Up after 60s' 'watchdog' 'Yellow' }
-    Start-Sleep -Seconds 3   # brief NAT stack buffer
+    Start-Sleep -Seconds 3
 
     # tshark vSwitch — detect interface number dynamically
     $ifaces = & $TsharkExe -D 2>&1
@@ -140,8 +156,18 @@ function Start-Sandbox-And-VSwitch {
     }
 }
 
+function Take-AutorunsSnapshot {
+    param([string]$OutFile)
+    if (Test-Path $AutorunsExe) {
+        Log "Taking Autoruns snapshot -> $OutFile" 'watchdog' 'Cyan'
+        & $AutorunsExe /accepteula '-a' '*' -c -h -s -nobanner -o $OutFile '*'
+        Log 'Autoruns snapshot complete.' 'watchdog' 'Green'
+    } else {
+        Log "WARNING: autorunsc64.exe not found at $AutorunsExe — persistence detection skipped." 'watchdog' 'Yellow'
+    }
+}
+
 # ── Single-instance guard ───────────────────────────────────────────────────────
-# Prevent multiple overlapping watchdog instances (e.g. if canary retries externally)
 
 $PidFile = "$OutputDir\watchdog.pid"
 
@@ -158,10 +184,8 @@ if (Test-Path $PidFile) {
     Remove-Item $PidFile -Force -ErrorAction SilentlyContinue
 }
 
-# Write our own PID
 $PID | Out-File $PidFile -Encoding UTF8 -Force
 
-# Clean up PID file on exit (register even if script is interrupted)
 $null = Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action {
     Remove-Item $PidFile -Force -ErrorAction SilentlyContinue
 }
@@ -176,8 +200,11 @@ if (-not $SkipClean) {
     Get-ChildItem $OutputDir -Filter 'capture*.pcapng' | Remove-Item -ErrorAction SilentlyContinue
 }
 
-# Initialise stream log
 "=== Watchdog started at $(Get-Date) ===" | Out-File $StreamLog -Encoding UTF8
+
+# ── Autoruns baseline ───────────────────────────────────────────────────────────
+
+Take-AutorunsSnapshot -OutFile "$OutputDir\autoruns-before.csv"
 
 # ── Main retry loop ─────────────────────────────────────────────────────────────
 
@@ -186,9 +213,12 @@ $success = $false
 for ($attempt = 1; $attempt -le $MaxRetries; $attempt++) {
     Log "=== Attempt $attempt of $MaxRetries ===" 'watchdog' 'Magenta'
 
+    if ($attempt -gt 1) {
+        Log "The sandbox stopped responding — restarting automatically. Attempt $attempt of $MaxRetries. Everything collected so far is preserved." 'watchdog' 'Yellow'
+    }
+
     $ts = Get-Date -Format 'yyyyMMdd-HHmmss'
 
-    # Clean logs from previous attempt (keep pcap/procmon)
     if ($attempt -gt 1) {
         'setup.log','pipeline.log','done.sentinel' | ForEach-Object { Remove-Item "$OutputDir\$_" -ErrorAction SilentlyContinue }
     }
@@ -200,12 +230,11 @@ for ($attempt = 1; $attempt -le $MaxRetries; $attempt++) {
     Start-Sandbox-And-VSwitch -ts $ts
 
     # ── Phase 1: wait for setup.log ─────────────────────────────────────────────
-    Log "Waiting up to ${SetupTimeoutSec}s for setup.log to appear..." 'watchdog'
+    Log "Waiting up to ${SetupTimeoutSec}s for sandbox to initialize..." 'watchdog'
     $deadline = (Get-Date).AddSeconds($SetupTimeoutSec)
     $setupFound = $false
     while ((Get-Date) -lt $deadline) {
         if (Test-Path "$OutputDir\setup.log") { $setupFound = $true; break }
-        # Also bail early if sandbox already died (bootstrap timeout)
         if (-not (Get-Process -Name 'WindowsSandboxServer' -ErrorAction SilentlyContinue)) {
             Log 'Sandbox exited before setup.log appeared (mapped-folder failure?).' 'watchdog' 'Red'
             break
@@ -214,23 +243,21 @@ for ($attempt = 1; $attempt -le $MaxRetries; $attempt++) {
     }
 
     if (-not $setupFound) {
-        Log "setup.log never appeared. Restarting..." 'watchdog' 'Red'
+        Log "Sandbox did not initialize within ${SetupTimeoutSec}s. Restarting..." 'watchdog' 'Red'
         continue
     }
 
-    Log 'setup.log found - streaming begins.' 'watchdog' 'Green'
+    Log 'Sandbox initialized — streaming output...' 'watchdog' 'Green'
 
     # ── Phase 2: stream logs until done or stall ────────────────────────────────
     $setupPos              = 0
     $pipelinePos           = 0
-    $pipelineCompletePos   = 0   # track where we last detected "Pipeline complete" so we don't re-fire on same line
-    $pipelineRunCount      = 0   # how many complete runs we've seen this session
+    $pipelineRunCount      = 0
     $lastUpdate            = Get-Date
 
     while ($true) {
         $sbAlive = [bool](Get-Process -Name 'WindowsSandboxServer','WindowsSandboxRemoteSession' -ErrorAction SilentlyContinue)
 
-        # Stream setup.log
         if (Test-Path "$OutputDir\setup.log") {
             $lines = Get-Content "$OutputDir\setup.log" -ErrorAction SilentlyContinue
             if ($lines -and $lines.Count -gt $setupPos) {
@@ -240,8 +267,6 @@ for ($attempt = 1; $attempt -le $MaxRetries; $attempt++) {
             }
         }
 
-        # Stream pipeline-realtime.log if present (auto-run mode, flushes per-line)
-        # Fall back to pipeline.log (interactive mode, Start-Transcript buffered)
         $pipelineFile = if (Test-Path "$OutputDir\pipeline-realtime.log") {
             "$OutputDir\pipeline-realtime.log"
         } else {
@@ -256,8 +281,6 @@ for ($attempt = 1; $attempt -le $MaxRetries; $attempt++) {
             }
         }
 
-        # Detect completion via sentinel file (written by setup.ps1 after Stop-Transcript)
-        # Avoids the pipeline.log file-lock race condition from the old "Pipeline complete" append approach
         if (Test-Path "$OutputDir\done.sentinel") {
             $pipelineRunCount++
             if ($Interactive) {
@@ -265,29 +288,23 @@ for ($attempt = 1; $attempt -le $MaxRetries; $attempt++) {
                 Remove-Item "$OutputDir\done.sentinel" -Force -ErrorAction SilentlyContinue
                 $lastUpdate = Get-Date
             } else {
-                Log "=== Pipeline complete (sentinel detected) - run successful. ===" 'watchdog' 'Green'
+                Log "=== Pipeline complete — run successful. ===" 'watchdog' 'Green'
                 $success = $true
                 break
             }
         }
 
-        # Natural exit: sandbox gone and we have pipeline output (or in interactive mode, sandbox exit is the only exit)
         if (-not $sbAlive -and $pipelinePos -gt 0) {
-            Log '=== Sandbox exited - session complete. ===' 'watchdog' 'Green'
+            Log '=== Sandbox exited — session complete. ===' 'watchdog' 'Green'
             $success = $true
             break
         }
 
-        # Stall detection — only applies before pipeline has started writing
-        # (after pipeline starts, silence means it's working, not stalled)
         $silenceSec = ((Get-Date) - $lastUpdate).TotalSeconds
         if ($silenceSec -gt $StallTimeoutSec -and $pipelinePos -eq 0) {
             Log "STALL: no log activity for $([int]$silenceSec)s and pipeline never started. Restarting..." 'watchdog' 'Red'
             break
         }
-        # NOTE: No stall detection once pipeline has started writing.
-        # Start-Transcript buffers output heavily during long stages — log silence does NOT mean stall.
-        # The only valid exit once pipeline is running is: "Pipeline complete" line OR sandbox process death.
 
         Start-Sleep -Seconds 2
     }
@@ -300,8 +317,12 @@ for ($attempt = 1; $attempt -le $MaxRetries; $attempt++) {
 Remove-Item $PidFile -Force -ErrorAction SilentlyContinue
 Stop-Monitors
 
-# ── Procmon cleanup — keep only the 3 most recent .pml files, delete the rest ───
-# These files are massive (1-5GB each) and accumulate quickly across runs
+# ── Autoruns after-snapshot ─────────────────────────────────────────────────────
+
+Take-AutorunsSnapshot -OutFile "$OutputDir\autoruns-after.csv"
+
+# ── Procmon cleanup — keep only the 3 most recent .pml files ───────────────────
+
 $allPml = Get-ChildItem $OutputDir -Filter '*.pml' -ErrorAction SilentlyContinue |
     Sort-Object LastWriteTime -Descending
 if ($allPml.Count -gt 3) {
@@ -316,7 +337,7 @@ if ($success) {
     Log '=== All done. Review stream.log, network logs, and pcap files. ===' 'watchdog' 'Green'
 } else {
     Log "=== Watchdog exhausted $MaxRetries attempts without success. ===" 'watchdog' 'Red'
-    Log 'Check stream.log for details.' 'watchdog' 'Red'
+    Log 'Check stream.log for details. The static analysis report is still valid.' 'watchdog' 'Red'
 }
 
 Write-Host ''
