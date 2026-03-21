@@ -2,7 +2,7 @@
 
 **Automated security testing for code — no security background needed.**
 
-Canary is a Claude Code skill that evaluates GitHub repos, local projects, pip packages, and npm packages for security issues, vulnerabilities, hardcoded secrets, and bugs. It gives you a plain-English verdict before you install or run anything.
+Canary is a Claude Code skill that evaluates GitHub repos, GitLab and Bitbucket repos, local projects, pip and npm packages, Cargo crates, NuGet packages, Docker images, and VS Code extensions for security issues, vulnerabilities, hardcoded secrets, and bugs. It gives you a plain-English verdict before you install or run anything.
 
 Named after the canary in a coal mine: it goes in first so you don't have to.
 
@@ -19,7 +19,7 @@ Named after the canary in a coal mine: it goes in first so you don't have to.
 
 Every finding is rated: `CRITICAL / HIGH / MEDIUM / LOW / INFO`
 
-Every report ends with a plain-English verdict: ✅ Safe / ⚠️ Caution / ❌ Unsafe
+Every report ends with a plain-English verdict: [OK] Safe / [!] Caution / [X] Unsafe
 
 ---
 
@@ -57,7 +57,7 @@ powershell -ExecutionPolicy Bypass -File install.ps1
 install.ps1   22f9c0092faf19ba36a1aa7dcdc35226dc8735c3c1cbeb0cdd4a6115f1c10ed4
 ```
 
-> ⚠️ The main risk with `irm | iex` is a compromised AppDevOnly account — a supply chain attack could replace install.ps1 with something malicious. Verifying the hash guards against that. Hashes are updated with each release.
+> [!] The main risk with `irm | iex` is a compromised AppDevOnly account -- a supply chain attack could replace install.ps1 with something malicious. Verifying the hash guards against that. Hashes are updated with each release.
 
 The installer:
 - Copies `canary.md` into `~/.claude/commands/` so `/canary` is available in Claude Code
@@ -75,10 +75,19 @@ Launch Claude Code, then run:
 ```
 
 Where `<target>` is:
-- A GitHub URL: `/canary https://github.com/someuser/somerepo`
+- A GitHub/GitLab/Bitbucket URL: `/canary https://github.com/someuser/somerepo`
 - A local path: `/canary ~/projects/my-app`
 - A pip package: `/canary pip:requests`
 - An npm package: `/canary npm:lodash`
+- A Cargo crate: `/canary cargo:serde`
+- A NuGet package: `/canary nuget:Newtonsoft.Json`
+- A Docker image: `/canary docker:nginx`
+- A VS Code extension: `/canary vscode:publisher.extension-name`
+
+To review a pull request for supply chain risk:
+```
+/canary pr https://github.com/someuser/somerepo/pull/123
+```
 
 Canary will ask how thorough you want it to be, then run the evaluation.
 
@@ -127,14 +136,15 @@ The installer checks both and walks you through anything that's missing.
 
 A structured plain-text report saved to `~/canary-reports/`:
 
-1. **Verdict** — ✅ / ⚠️ / ❌ with one-sentence rationale
+1. **Verdict** — [OK] / [!] / [X] with one-sentence rationale
 2. **Executive summary** — non-technical overview with risk counts
-3. **Findings** — each issue with severity, plain-English explanation, and fix
-4. **Security analysis** — network, process, persistence, credentials
-5. **Dependency audit** — CVEs, outdated packages, license issues
-6. **Code quality** — bad practices, complexity, test coverage
-7. **Sandbox results** — what the software actually did at runtime (Full only)
-8. **Recommendation** — exactly what to do next
+3. **Findings summary** — severity breakdown at a glance
+4. **Findings** — each issue with severity, plain-English explanation, and fix
+5. **Security analysis** — network, process, persistence, credentials
+6. **Dependency audit** — CVEs, outdated packages, license issues
+7. **Code quality** — bad practices, complexity, test coverage
+8. **Sandbox results** — what the software actually did at runtime (Full only)
+9. **Recommendation** — exactly what to do next
 
 ---
 
