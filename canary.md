@@ -1,4 +1,4 @@
-﻿---
+---
 description: Evaluate code for security issues, dependency vulnerabilities, bugs, and quality problems before installing
 version: 2.8
 ---
@@ -1700,6 +1700,10 @@ Write the section using the values above:
 Canary v2.8  use at your own risk. This tool reduces risk but does not guarantee safety.
 No security evaluation is a substitute for your own judgment. Review findings before
 installing any software. https://github.com/AppDevOnly/canary
+
+This report may reference the MITRE ATT&CK(R) knowledge base. MITRE ATT&CK(R) is a
+registered trademark of The MITRE Corporation, used under CC BY 4.0.
+https://attack.mitre.org
 ```
 
 Cache read % = cache_read / (input + cache_read) * 100, rounded to nearest integer.
@@ -1722,8 +1726,6 @@ Then ask the user: "Want me to save a note so future sessions know this evaluati
 ## Troubleshooting
 
 Respond to any plain-English problem description at any point during the evaluation. Diagnose and fix without requiring the user to run commands themselves.
-
----
 
 ---
 
