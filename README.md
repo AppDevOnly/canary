@@ -154,6 +154,14 @@ Anyone who wants to check code before trusting it — developers, tinkerers, and
 
 ---
 
+## Acknowledgments
+
+Canary uses the [MITRE ATT&CK®](https://attack.mitre.org) framework to classify and tag security
+findings. MITRE ATT&CK® is a registered trademark of The MITRE Corporation. Technique mappings
+reference the ATT&CK knowledge base, published under the Creative Commons Attribution 4.0 license.
+
+---
+
 ## Contributing
 
 Issues and PRs welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
