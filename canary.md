@@ -121,25 +121,22 @@ it must not do it itself.
 
 **Secure storage (one-time setup, Windows):**
 
+Run the setup script in a PowerShell window (NOT through Claude -- it requires interactive input):
 ```powershell
-# Install Microsoft's official secret vault (encrypted via Windows DPAPI)
-Install-Module Microsoft.PowerShell.SecretManagement, Microsoft.PowerShell.SecretStore -Scope CurrentUser -Force
-Register-SecretVault -Name CanaryVault -ModuleName Microsoft.PowerShell.SecretStore -DefaultVault
-Set-SecretStoreConfiguration -Authentication None -Interaction None -Confirm:$false
-
-# Store each key (run once per key)
-Set-Secret -Name VT_API_KEY      -Secret 'your-key' -Vault CanaryVault
-Set-Secret -Name NVD_API_KEY     -Secret 'your-key' -Vault CanaryVault
-Set-Secret -Name GITLAB_TOKEN    -Secret 'your-key' -Vault CanaryVault
-Set-Secret -Name BITBUCKET_TOKEN -Secret 'your-key' -Vault CanaryVault
-
-# Add to PowerShell profile so keys load at shell startup
-# (decrypts at load time -- no plaintext in the profile file)
-$keys = @('VT_API_KEY','NVD_API_KEY','GITLAB_TOKEN','BITBUCKET_TOKEN')
-foreach ($k in $keys) {
-    try { [System.Environment]::SetEnvironmentVariable($k, (Get-Secret -Name $k -Vault CanaryVault -AsPlainText -ErrorAction Stop), 'Process') } catch {}
-}
+powershell -ExecutionPolicy Bypass -File C:\temp\canary-setup-keys.ps1
 ```
+
+Canary writes this script automatically during the VT dependency check when a key is missing.
+The script handles the full setup sequence in the correct order:
+1. Install SecretManagement modules if missing
+2. Register CanaryVault
+3. Run Reset-SecretStore BEFORE any Set-Secret call (critical -- avoids password prompt)
+4. Prompt for each key securely (input hidden)
+5. Add vault loader to PowerShell profile
+
+**Why Reset-SecretStore must come before Set-Secret:** SecretStore requires initialization
+on first use. If Set-Secret runs first, it triggers an interactive password setup prompt
+that blocks non-interactive shells. Reset-SecretStore initializes it passwordless upfront.
 
 | Key | Purpose | Get it at |
 |---|---|---|
@@ -455,33 +452,111 @@ If target is a local path, pip package, or npm package: no tool check needed for
 
 **VirusTotal API key (optional but strongly recommended):**
 
-Check via PowerShell script file only -- never inline, bash will mangle the $env variable:
+Check via PowerShell script file only -- never inline, bash will mangle the $env variable.
+This check has two stages: env var first, then CanaryVault fallback.
+
+Write and run `C:\temp\check-vt.ps1`:
 ```powershell
-# Write to a temp file and run it -- avoids bash escaping issues with $env:
-'if ([string]::IsNullOrEmpty($env:VT_API_KEY)) { "VT_NOT_SET" } else { "VT_SET" }' |
-  Out-File 'C:\temp\check-vt.ps1' -Encoding UTF8 -Force
-powershell -NoProfile -File 'C:\temp\check-vt.ps1'
+# Stage 1: env var already set?
+if (-not [string]::IsNullOrEmpty($env:VT_API_KEY)) { "VT_SET"; exit }
+
+# Stage 2: try loading from CanaryVault
+try {
+    Import-Module Microsoft.PowerShell.SecretManagement -ErrorAction Stop
+    $val = Get-Secret -Name VT_API_KEY -Vault CanaryVault -AsPlainText -ErrorAction Stop
+    if (-not [string]::IsNullOrEmpty($val)) {
+        [System.Environment]::SetEnvironmentVariable('VT_API_KEY', $val, 'Process')
+        "VT_SET"
+    } else { "VT_NOT_SET" }
+} catch { "VT_NOT_SET" }
 ```
-If not set:
-> "VirusTotal integration isn't configured  I won't be able to check pre-compiled binaries against 70+ AV engines. This is especially important for repos that ship .exe or .dll files.
+
+If VT_SET: proceed silently. The key is available for this session.
+
+If VT_NOT_SET:
+> "VirusTotal isn't configured -- I won't be able to check binaries against 70+ AV engines.
+> This is especially important for repos that ship .exe or .dll files.
 >
-> To enable it: sign up free at https://www.virustotal.com, go to your profile  API Key, copy it.
-> Then store it securely (never paste API keys into files in plaintext):
+> Get a free API key at https://www.virustotal.com (Profile > API Key, 500 checks/day free).
 >
+> Then run this in a PowerShell window to store it securely:
 > ```powershell
-> # One-time setup -- stores key encrypted via Windows DPAPI
-> Install-Module Microsoft.PowerShell.SecretManagement, Microsoft.PowerShell.SecretStore -Scope CurrentUser -Force
-> Register-SecretVault -Name CanaryVault -ModuleName Microsoft.PowerShell.SecretStore -DefaultVault
-> Set-SecretStoreConfiguration -Authentication None -Interaction None -Confirm:$false
-> Set-Secret -Name VT_API_KEY -Secret 'your-key-here' -Vault CanaryVault
->
-> # Add this to your PowerShell profile so it loads automatically:
-> $env:VT_API_KEY = Get-Secret -Name VT_API_KEY -Vault CanaryVault -AsPlainText
+> powershell -ExecutionPolicy Bypass -File C:\temp\canary-setup-keys.ps1
 > ```
 >
-> Free tier gives 500 lookups/day  plenty for normal canary use. Continue without it?"
+> (I'll write that script for you now if you'd like to set it up.)
+>
+> Continue without VirusTotal?"
 
-If user declines or skips: note "VirusTotal: not configured  binary hash checks skipped" in the report. Continue the scan.
+When the user says they want to set it up, write `C:\temp\canary-setup-keys.ps1`:
+```powershell
+# canary-setup-keys.ps1 -- run this in a PowerShell window, not through Claude
+# Keys are encrypted via Windows DPAPI. Nothing stored in plaintext.
+Set-StrictMode -Off
+Import-Module Microsoft.PowerShell.SecretManagement -ErrorAction SilentlyContinue
+Import-Module Microsoft.PowerShell.SecretStore -ErrorAction SilentlyContinue
+
+# Install modules if missing
+if (-not (Get-Module -ListAvailable Microsoft.PowerShell.SecretManagement)) {
+    Write-Host "Installing SecretManagement modules..."
+    Install-Module Microsoft.PowerShell.SecretManagement, Microsoft.PowerShell.SecretStore -Scope CurrentUser -Force
+    Import-Module Microsoft.PowerShell.SecretManagement
+    Import-Module Microsoft.PowerShell.SecretStore
+}
+
+# Register vault if needed
+if (-not (Get-SecretVault -Name CanaryVault -ErrorAction SilentlyContinue)) {
+    Register-SecretVault -Name CanaryVault -ModuleName Microsoft.PowerShell.SecretStore -DefaultVault
+    Write-Host "Vault registered."
+}
+
+# IMPORTANT: Reset-SecretStore must run BEFORE Set-Secret on a new vault.
+# This configures passwordless mode (DPAPI only). Skipped if store already has data.
+$storeData = Get-ChildItem "$env:LOCALAPPDATA\Microsoft\PowerShell\secretmanagement\localstore" -ErrorAction SilentlyContinue
+if (-not $storeData) {
+    Reset-SecretStore -Authentication None -Interaction None -Confirm:$false
+    Write-Host "Vault configured: passwordless (encrypted with your Windows account)."
+}
+
+# Store VT key
+Write-Host ""
+Write-Host "VirusTotal API key -- get yours free at https://www.virustotal.com (Profile > API Key)"
+Write-Host "Enter your API key (input is hidden):"
+Set-Secret -Name VT_API_KEY -Vault CanaryVault
+Write-Host "VT_API_KEY stored."
+
+# Add vault loader to PowerShell profile (loads all Canary keys at shell startup)
+$loader = @'
+
+# Canary key loader -- loads API keys from encrypted CanaryVault at startup
+try {
+    Import-Module Microsoft.PowerShell.SecretManagement -ErrorAction Stop
+    foreach ($k in @('VT_API_KEY','NVD_API_KEY','GITLAB_TOKEN','BITBUCKET_TOKEN')) {
+        $v = Get-Secret -Name $k -Vault CanaryVault -AsPlainText -ErrorAction SilentlyContinue
+        if ($v) { [System.Environment]::SetEnvironmentVariable($k, $v, 'Process') }
+    }
+} catch {}
+'@
+
+if (-not (Test-Path $PROFILE)) { New-Item -ItemType File -Path $PROFILE -Force | Out-Null }
+if ((Get-Content $PROFILE -Raw -ErrorAction SilentlyContinue) -notmatch 'CanaryVault') {
+    Add-Content $PROFILE $loader
+    Write-Host "Profile updated -- keys will load automatically in all future PowerShell sessions."
+}
+
+Write-Host ""
+Write-Host "Done. Restart Claude Code to pick up the key, or run: " -NoNewline
+Write-Host '$env:VT_API_KEY = Get-Secret -Name VT_API_KEY -Vault CanaryVault -AsPlainText'
+```
+
+Tell the user:
+> "I've written the setup script to C:\temp\canary-setup-keys.ps1. Open a PowerShell window
+> and run: powershell -ExecutionPolicy Bypass -File C:\temp\canary-setup-keys.ps1
+> Come back here when it's done and I'll verify the key loaded."
+
+After they return, re-run the VT check script. If VT_SET: confirm and continue.
+
+If user declines or skips: note "VirusTotal: not configured -- binary hash checks skipped" in the report. Continue the scan.
 
 ### Dependency check  Medium
 
