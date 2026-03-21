@@ -1,5 +1,35 @@
 # Canary Changelog
 
+## v2.8 (2026-03-21)
+
+### Added
+- SBOM generation: CycloneDX 1.5 JSON output from pip-audit and npm-audit results
+- NVD API fallback for non-pip/npm dependency CVE checks (C++, Go, Rust, system packages)
+- VirusTotal integration: binary AV scan for GitHub releases, local files, pip/npm packages
+- Typosquatting detection for pip and npm targets
+- 10 target types: GitHub, GitLab, Bitbucket, local path, pip, npm, cargo, nuget, docker, vscode
+- Platform-aware tier menu: Linux/Mac shows Quick and Medium; Full noted as Windows-only
+- Sandbox JSON summarization: results written to summary.txt rather than raw JSON in context
+- Batch reads in Phase 2a for faster static analysis
+- Dangerous-by-design verdict category for software whose purpose is inherently harmful
+- Offensive repo override: researcher mode for security tools, exploit code, and POCs
+- Findings Summary section in report template
+- Reading This Report section in report template with verdict legend
+- MITRE ATT&CK technique tags on security findings (MEDIUM severity and above)
+- setup-template.ps1: base template for Full mode sandbox setup scripts
+
+### Changed
+- trufflehog now runs in git mode with --depth 50, scanning commit history including
+  recently-removed secrets (previously used filesystem mode on --depth 1 clone)
+- Sandbox bootstrap installs Python, Git, and Node via winget inside the sandbox before
+  any analysis tools run -- eliminates silent failures on clean sandbox images
+- Capability tests re-run after each tool install inside sandbox to catch PATH and
+  compatibility issues before they cause mid-scan failures
+- Automatic version check runs silently on every invocation (non-blocking)
+- Token usage section updated to Sonnet 4.6 pricing
+
+---
+
 ## v2.5 (2026-03-19)
 
 ### Added

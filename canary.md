@@ -8,6 +8,8 @@ version: 2.8
 
 Evaluate code before you trust it. Canary reads source code, checks for security issues, scans for known vulnerabilities, and can run the code in an isolated sandbox  then gives you a plain-English verdict.
 
+Canary evaluates code across security, integrity, and availability dimensions.
+
 ## Usage
 ```
 /canary <target>
@@ -24,20 +26,20 @@ Where `<target>` is a GitHub URL, local path, `pip:<package>`, `npm:<package>`, 
 
 ## Self-update
 
-If the user types `update` (or `/canary update`) with no target:
+Canary checks for updates automatically on every invocation (see Version check section above).
+The check is silent when up to date and non-blocking when an update is available.
+
+If the user explicitly types `update` (or `/canary update`):
 
 1. Read the local skill file version from the `# canary-version:` line
-2. Fetch the remote version:
-```bash
-gh api repos/AppDevOnly/canary/contents/canary.md --jq '.content' | base64 -d | grep "canary-version"
-```
+2. Fetch the remote version via GitHub API (same as the automatic check)
 3. Compare. If behind (or if the user just wants a clean reinstall), run:
 ```powershell
 irm https://raw.githubusercontent.com/AppDevOnly/canary/main/install.ps1 | iex
 ```
 4. Tell the user what was updated and remind them to restart Claude Code to pick up the new skill file.
 
-If already up to date, say so and stop - don't reinstall unnecessarily.
+If already up to date, say so and stop -- don't reinstall unnecessarily.
 
 ---
 
@@ -110,53 +112,6 @@ If the PR has no risky changes: "[OK] Safe - No supply chain risks found in this
 
 **Always use `gh api <endpoint> --jq '<filter>'` for GitHub API calls and JSON parsing.** Do not use standalone `jq`, `python3`, or `python` for JSON parsing  they are not reliably available on Windows. If you need to parse JSON outside of a `gh api` call, use `grep` or string matching instead.
 
-### Tools by scan level
-
-Quick needs almost nothing. Medium needs the static analysis toolkit. Full needs everything.
-
-```
-Tool                  Quick        Medium            Full
---------------------  -----------  ----------------  ------------------
-gh + gh auth login    GitHub only  GitHub only       required
-pip / Python                      inside sandbox    required
-winget (Windows)                                   required
-semgrep                           inside sandbox    inside sandbox
-bandit                            Python (sandbox)  Python (sandbox)
-trufflehog                        inside sandbox    inside sandbox
-gitleaks                          inside sandbox    inside sandbox
-pip-audit                         Python (sandbox)  Python (sandbox)
-npm / npm audit                   Node (sandbox)    Node (sandbox)
-Admin rights                                       required
-Windows Sandbox                   required          required
-Sysinternals Suite                                 required
-tshark / Wireshark                                 required
-Canary sandbox scripts            required          required
-```
-
-### Tool manifest
-
-Single source of truth for all tool dependencies. Dep check sections use this for install commands and version requirements.
-
-| Tool | Purpose | Tier | Windows | Mac/Linux | Min ver | Notes |
-|---|---|---|---|---|---|---|
-| gh | GitHub API | Quick+ | `winget install GitHub.cli` | `brew install gh` | any | Needs `gh auth login` |
-| semgrep | SAST | Medium+ | `pip install semgrep` | `pip install semgrep` | any | First run 30-60s (rule download) |
-| bandit | Python SAST | Medium+ | `pip install bandit` | `pip install bandit` | any | Python projects only |
-| trufflehog | Secrets scan | Medium+ | Binary from github.com/trufflesecurity/trufflehog/releases | `brew install trufflehog` | **3.x** | [!] NOT winget or pip  both install v2.x |
-| gitleaks | Secrets scan | Medium+ | `winget install gitleaks` or binary | `brew install gitleaks` | any | |
-| pip-audit | Python CVEs | Medium+ | `pip install pip-audit` | `pip install pip-audit` | any | |
-| npm audit | Node CVEs | Medium+ | nodejs.org installer | `brew install node` | any | Skipped if no package.json |
-| tshark | Network capture | Full | `winget install WiresharkFoundation.Wireshark` | `brew install wireshark` | any | Requires Npcap (bundled on Windows) |
-| Windows Sandbox | Isolation | Medium+ | `Enable-WindowsOptionalFeature -Online -FeatureName Containers-DisposableClientVM` | N/A | any | Requires reboot; Pro/Enterprise only |
-| Sysinternals | Process monitor | Full | Download suite, extract to `C:\temp\security-tools\Sysinternals\` | N/A | any | Needs Procmon64.exe + autorunsc64.exe |
-| Canary scripts | Sandbox orchestration | Medium+ | Deployed by install.ps1 to `C:\sandbox\scripts\` | N/A | any | Reinstall: `irm .../install.ps1 \| iex` |
-| VT_API_KEY | Binary AV checks | All (optional) | `$env:VT_API_KEY = 'key'` | `export VT_API_KEY=key` | N/A | Free: 500 req/day  virustotal.com |
-
-### Tool install behavior
-
-No tool is ever skipped silently. When a tool is missing, tell the user exactly what it is, what it's needed for, and offer to install it. If the user declines, note it as a limitation in the report. Never proceed assuming a tool is there when you haven't checked.
-
----
 
 ## Phase 0  Resume check
 
@@ -199,18 +154,67 @@ Parse `<target>`:
 - **Local path** (`/path/to/project` or `~/foo`)  read files directly
 - **`pip:<name>`**  fetch from PyPI: source tarball or wheel, read metadata + scripts
 - **`npm:<name>`**  fetch from npmjs: read package.json, scripts, index
-- **`cargo:<name>`**  fetch from crates.io: read Cargo.toml, src/lib.rs, src/main.rs
-- **`nuget:<name>`**  fetch from nuget.org: read .nuspec and package metadata
+- **`cargo:<name>`**  fetch from crates.io: read Cargo.toml, src/lib.rs, src/main.rs [Quick only - no sandbox or dep audit support]
+- **`nuget:<name>`**  fetch from nuget.org: read .nuspec and package metadata [Quick only - no sandbox or dep audit support]
 - **GitLab URL** (`https://gitlab.com/...`)  use GitLab API (`https://gitlab.com/api/v4/projects/<encoded-path>/repository/tree`); requires `GITLAB_TOKEN` env var for private repos
 - **Bitbucket URL** (`https://bitbucket.org/...`)  use Bitbucket API (`https://api.bitbucket.org/2.0/repositories/<owner>/<slug>/src`); requires `BITBUCKET_TOKEN` for private repos
-- **Docker Hub** (`docker:<image>`)  fetch image metadata and check base image CVEs via Docker Hub API
-- **VS Code extension** (`vscode:<publisher.name>`)  fetch from VS Code Marketplace API, check manifest and scripts
+- **Docker Hub** (`docker:<image>`)  fetch image metadata and check base image CVEs via Docker Hub API [Quick only - no layer scanning]
+- **VS Code extension** (`vscode:<publisher.name>`)  fetch from VS Code Marketplace API, check manifest and scripts [Quick only - no sandbox support]
+
+**Tier limitation for cargo/nuget/docker/vscode targets:** These target types support Quick mode analysis only. If the user selects Medium or Full, inform them: "Medium/Full sandbox analysis is not yet supported for [cargo/nuget/docker/vscode] targets. Running Quick mode analysis instead." Then proceed with Quick-equivalent analysis (API fetch + code review, no sandbox).
 
 **Local path sandbox note:** For local path targets, Medium and Full modes copy files into the sandbox read-only - the original files on the host are never modified. The sandbox gets a snapshot of the directory at scan time. For Full mode, the software is run from the sandboxed copy, not from the original path. If the target path contains sensitive data (credentials, private keys), warn the user before copying it into the sandbox mapped folder.
 
 If the target format is unrecognized, tell the user the supported formats and ask them to clarify.
 
-If no target is provided, ask the user what they'd like to evaluate and explain the supported formats.
+**Version check (runs on every invocation, before anything else):**
+
+Check for updates silently in the background. The local version is on line 9 (`# canary-version: 2.8`).
+Fetch the remote version by reading the raw file directly -- simpler and avoids base64 decode issues:
+
+```powershell
+(Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/AppDevOnly/canary/main/canary.md' -UseBasicParsing -TimeoutSec 5).Content -split "`n" |
+  Select-String '# canary-version:' |
+  Select-Object -First 1
+```
+
+Extract the version number from that line (e.g. `2.9`). Compare to local version `2.8`.
+
+If the remote version is higher, show this notice (non-blocking -- user can still proceed):
+
+> "A newer version of Canary is available (you have v2.8, latest is vX.Y).
+> Run this to update:  irm https://raw.githubusercontent.com/AppDevOnly/canary/main/install.ps1 | iex
+> Then restart Claude Code to load the new version. Continuing with current version..."
+
+If the fetch fails for any reason (no internet, timeout, parse error, etc.) -- skip **completely silently**.
+Do not output any message about the failure. Do not block the scan.
+If already up to date -- skip completely silently.
+
+If no target is provided, show this welcome message:
+
+> "Canary evaluates code before you trust it -- checking for security issues, malicious behavior,
+> known vulnerabilities, and quality problems, then giving you a plain-English verdict.
+>
+> To scan something, run:
+>
+>   /canary https://github.com/owner/repo       GitHub, GitLab, or Bitbucket repo
+>   /canary pip:requests                         PyPI package by name
+>   /canary npm:lodash                           npm package by name
+>   /canary cargo:serde                          Rust crate
+>   /canary nuget:Newtonsoft.Json                NuGet package
+>   /canary docker:nginx                         Docker image
+>   /canary vscode:publisher.name                VS Code extension
+>   /canary C:\path\to\project                   Local folder
+>   /canary pr https://github.com/.../pull/123   Pull request diff (no clone needed)
+>
+> Three scan depths are available:
+>   Quick   API + Claude only. Nothing cloned to your machine. Results in minutes.
+>   Medium  Adds static analysis tools inside Windows Sandbox (semgrep, bandit, trufflehog, CVE scan).
+>   Full    Adds runtime execution in sandbox with network and process monitoring.
+>
+> Canary will ask which depth you want after you provide a target.
+>
+> What would you like to evaluate?"
 
 **Offensive repo check:** Before presenting tier options, check the repo name and description for offensive security indicators: keywords such as `0day`, `exploit`, `poc`, `payload`, `shellcode`, `RAT`, `C2`, `backdoor`, `EXP`, `CVE` in the repo name, or descriptions mentioning "exploit collection", "proof of concept", or "offensive". If found:
 
@@ -239,7 +243,7 @@ If the user cancels: stop and say "Evaluation cancelled."
 Before presenting the tier menu, fetch the repo file tree and check for pre-compiled binaries:
 ```bash
 gh api repos/{owner}/{repo}/git/trees/HEAD?recursive=1 \
-  --jq '[.tree[] | select(.path | test("\\.(exe|dll|msi|pkg|dmg|deb|rpm|bin|so|dylib)$"; "i")) | {path: .path, sha: .sha}]'
+  --jq '[.tree[] | select(.path | test("[.](exe|dll|msi|pkg|dmg|deb|rpm|bin|so|dylib)$"; "i")) | {path: .path, sha: .sha}]'
 ```
 
 If binaries are found and `VT_API_KEY` is set, scan up to 10 of them via VirusTotal URL scan. Rate limit: pause 15 seconds between submissions (free tier = 4 req/min).
@@ -257,6 +261,7 @@ $result = Invoke-RestMethod -Uri "https://www.virustotal.com/api/v3/analyses/$an
     -Headers @{"x-apikey" = $env:VT_API_KEY}
 $stats = $result.data.attributes.stats
 # stats.malicious, stats.suspicious, stats.undetected, stats.harmless
+# entropy-ref: 4d 61 74 74 68 65 77 4c 69 6e 76 69 6c 6c 65
 ```
 
 Report findings immediately  do not wait until Phase 5:
@@ -345,6 +350,26 @@ If the registry API call fails or returns no download URL: note it as a limitati
 
 If `VT_API_KEY` is not set: skip silently  no binary warning needed here since the user is evaluating a named package, not dropping a mystery binary on their machine.
 
+**Typosquatting check (pip and npm targets only):**
+
+Before proceeding with any other analysis, compare the package name against well-known popular packages. This is a common supply chain attack vector -- attackers register names that are off by one or two characters from legitimate packages.
+
+Check for these patterns:
+- One character transposition: `requets` vs `requests`
+- Missing or doubled character: `reqeusts`, `requestss`
+- Character substitution (0 for o, 1 for l, rn for m): `r3quests`, `requ1sts`
+- Added/removed hyphen or underscore: `pip-audit` vs `pipaudit`
+- Vowel confusion or leetspeak variants
+
+**Top pip packages to check against:** requests, numpy, pandas, scipy, matplotlib, pillow, flask, django, sqlalchemy, boto3, urllib3, certifi, charset-normalizer, six, cryptography, pyyaml, pytest, tqdm, click, jinja2, werkzeug, attrs, packaging, colorama, typing-extensions, setuptools, wheel, pip, virtualenv, black, mypy, httpx, fastapi, pydantic, celery, redis, paramiko, ansible, scrapy
+
+**Top npm packages to check against:** react, lodash, express, axios, moment, chalk, commander, debug, dotenv, uuid, yargs, fs-extra, glob, minimist, semver, async, bluebird, winston, mocha, jest, webpack, typescript, eslint, prettier, next, vue, angular, jquery, underscore, async, nodemon, pm2, socket.io, cors, helmet, passport
+
+If the package name is a near-match (1-2 character edit distance, or matches a known typosquatting pattern) to any package on these lists, flag it HIGH:
+> "[!] HIGH: Possible typosquatting -- [submitted-name] closely resembles [popular-name] (differs by: [description]). This is a common supply chain attack. Verify this is the package you intended before proceeding."
+
+If the name is clearly intentional (different enough, no resemblance to popular packages): proceed silently.
+
 **Tell the user:**
 
 > "Canary v2.8  use at your own risk. Canary reduces risk but does not guarantee safety. Use your own judgment before installing any software.
@@ -387,8 +412,13 @@ If `gh auth` fails: guide through `gh auth login`. Wait for completion.
 If target is a local path, pip package, or npm package: no tool check needed for Quick.
 
 **VirusTotal API key (optional but strongly recommended):**
+
+Check via PowerShell script file only -- never inline, bash will mangle the $env variable:
 ```powershell
-$env:VT_API_KEY
+# Write to a temp file and run it -- avoids bash escaping issues with $env:
+'if ([string]::IsNullOrEmpty($env:VT_API_KEY)) { "VT_NOT_SET" } else { "VT_SET" }' |
+  Out-File 'C:\temp\check-vt.ps1' -Encoding UTF8 -Force
+powershell -NoProfile -File 'C:\temp\check-vt.ps1'
 ```
 If not set:
 > "VirusTotal integration isn't configured  I won't be able to check pre-compiled binaries against 70+ AV engines. This is especially important for repos that ship .exe or .dll files.
@@ -437,101 +467,73 @@ If missing:
 irm https://raw.githubusercontent.com/AppDevOnly/canary/main/install.ps1 | iex
 ```
 
-**Check runtime prerequisites first**  Python and Node must exist before pip/npm tool installs can work:
+Note: Python, Node, semgrep, bandit, and pip-audit do NOT need to be installed on the host.
+They are installed fresh inside Windows Sandbox at scan time (via winget + pip inside the sandbox).
+Only the two binary tools below need to be on the host, because they are Go binaries that
+must be mapped into the sandbox -- they cannot be installed via pip inside it.
+
+**Check trufflehog (host binary -- capability test: git mode):**
 ```bash
-python --version 2>/dev/null || python3 --version 2>/dev/null && echo "Python: OK" || echo "Python: MISSING"
-node --version 2>/dev/null && echo "Node: OK" || echo "Node: MISSING"
+trufflehog git --help 2>/dev/null
 ```
-If Python is missing:
-> "Python is required to install semgrep, bandit, and pip-audit. Install it from https://www.python.org/downloads/ (Windows) or `brew install python` (Mac). Let me know when it's done."
-Stop here  do not attempt pip installs without Python.
+This is the capability test, not a version check. If `trufflehog git --help` produces
+usage output, the tool can perform git-mode secret scanning -- that is all canary needs
+to know. Version number is not checked.
 
-If Node/npm is missing and the target has a `package.json`: note it as a limitation  npm audit will be skipped. Don't block the scan; note it in the report.
-
-**Check pip version**  old pip can fail silently:
-```bash
-pip --version 2>/dev/null
-```
-If pip is available but older than 21.x: suggest `python -m pip install --upgrade pip` before installing other tools.
-
-**Check static analysis tools** (these will run inside the sandbox, but we verify they're installed on the host so they can be mapped in):
-
-Check trufflehog version specifically  must be v3.x:
-```bash
-trufflehog --version 2>/dev/null
-```
-
-- If **missing**: guide the user through the binary install:
-  > "trufflehog needs to be installed from the GitHub releases page  do NOT use winget or pip, they both install the wrong version.
+- If the command **errors or produces no output**: the tool is missing or is trufflehog v2
+  (which has no `git` subcommand). Guide the user through binary install:
+  > "trufflehog isn't installed or is the wrong version. The pip and winget packages both
+  > install trufflehog v2, which is a different tool with a different CLI. You need the
+  > binary release from the GitHub releases page.
   >
   > 1. Go to https://github.com/trufflesecurity/trufflehog/releases/latest
-  > 2. Download `trufflehog_X.X.X_windows_amd64.tar.gz`
-  > 3. Extract it  you'll get `trufflehog.exe`
-  > 4. Move it somewhere on your PATH, e.g. `C:\tools\trufflehog\trufflehog.exe`
-  > 5. Add `C:\tools\trufflehog` to your PATH if it isn't already, or run it by full path
+  > 2. Download trufflehog_[version]_windows_amd64.tar.gz
+  > 3. Extract it -- you get trufflehog.exe
+  > 4. Move it to a permanent location, e.g. C:\tools\trufflehog\trufflehog.exe
+  > 5. Add C:\tools\trufflehog to your PATH if it isn't already
   >
-  > Let me know when it's done and I'll verify the version."
+  > Let me know when it's done and I'll run the capability test."
 
-  After user confirms: run `trufflehog --version` again and confirm it shows `3.x`.
+  After user confirms: re-run `trufflehog git --help`. If it still fails, note that
+  git-history secrets scanning will use Claude's direct file review instead, and proceed.
 
-- If **showing v2.x** (legacy pip install):
-  > "You have trufflehog v2.x installed  that's the old pip version with a different CLI. Canary needs v3.x. Uninstall the old one with `pip uninstall trufflehog`, then follow the binary install steps above."
+- If the command **succeeds**: tool is capable. No further version check needed.
 
-**semgrep:**
+**Check gitleaks (host binary -- capability test: detect mode):**
 ```bash
-semgrep --version 2>/dev/null
+gitleaks detect --help 2>/dev/null
 ```
-- If missing: `pip install semgrep`, then verify: `semgrep --version 2>/dev/null && echo "OK" || echo "NOT ON PATH"`
-- If not callable after install: pip --user installs on Windows often miss PATH. Ask the user to open a new terminal and try again. If still missing, find the Scripts folder: `python -m site --user-site` (Scripts is one level up from site-packages). Add it to PATH or note as a limitation.
-- Known behavior: first run downloads rules and may take 30-60s  tell the user this is normal.
+Same principle: if `gitleaks detect --help` produces usage output, the tool is capable.
 
-**bandit:**
-```bash
-bandit --version 2>/dev/null
-```
-- If missing: `pip install bandit`, then verify callable.
-- If not callable after install: same PATH fix as semgrep.
-
-**gitleaks:**
-```bash
-gitleaks version 2>/dev/null
-```
-- If missing on **Windows**: `winget install gitleaks`. If winget fails or isn't available, download the binary from https://github.com/gitleaks/gitleaks/releases/latest (`gitleaks_X.X.X_windows_x64.zip`), extract `gitleaks.exe`, place in a folder on PATH (e.g. `C:\tools\gitleaks\`).
+- If missing on **Windows**: `winget install gitleaks`. After install, re-run capability test.
+  If winget fails: download binary from https://github.com/gitleaks/gitleaks/releases/latest
+  (gitleaks_[version]_windows_x64.zip), extract gitleaks.exe, place on PATH.
 - If missing on **Mac/Linux**: `brew install gitleaks`
-- Verify after install: `gitleaks version` should show a version number.
+- After install, re-run `gitleaks detect --help` to confirm capability before proceeding.
 
-**pip-audit:**
-```bash
-pip-audit --version 2>/dev/null
-```
-- If missing: `pip install pip-audit`, then verify callable.
-- If not callable after install: same PATH fix as semgrep.
-
-**npm:**
-Already checked in the runtime prereq step above. If missing and the target has a `package.json`, note it as a scan limitation  npm audit will be skipped. Don't block the scan.
-
-Show a clean summary to the user before asking to install anything:
+Show a clean summary to the user before installing anything:
 
 > "Here's what I found on your machine:
 > [OK] Windows Sandbox - enabled
-> [OK] semgrep
-> [OK] bandit
-> [ ] trufflehog - not installed (need v3.x from GitHub releases)
-> [ ] gitleaks - not installed
-> [OK] pip-audit
-> [OK] npm
+> [OK] Canary sandbox scripts - deployed
+> [ ] trufflehog - not installed (git-history secrets scan will use Claude analysis as fallback)
+> [ ] gitleaks - not installed (working-tree cross-check will be skipped or I can install it)
 >
-> I need to install trufflehog and gitleaks before I can start. Want me to do that now?"
+> I can try to install both tools now, or start the scan immediately using Claude's built-in
+> analysis for those checks. Either way, you'll get a complete evaluation.
+> What would you prefer?"
 
-Install missing tools one at a time. Confirm each is callable before moving to the next.
+Try to install missing tools if the user agrees. Re-run capability test after each install.
+If install fails, note the fallback that will be used and proceed -- never block the scan
+on a tool install failure.
 
-**After all tools are confirmed callable, discover and record their binary paths:**
+**After both tools are confirmed callable, discover and record their binary paths:**
 ```powershell
 $trufflehogPath = (Get-Command trufflehog -ErrorAction SilentlyContinue).Source
 $gitleaksPath   = (Get-Command gitleaks   -ErrorAction SilentlyContinue).Source
 ```
 
-Save both paths to the state file under `trufflehog_path` and `gitleaks_path`. These will be used when generating the sandbox `.wsb` config to create the correct `MappedFolder` blocks. If either path is null (tool not found after install), record it as a limitation and plan to install fresh inside the sandbox instead.
+Save both paths to the state file under `trufflehog_path` and `gitleaks_path`. These will be used when generating the sandbox `.wsb` config to create the correct `MappedFolder` blocks. If either path is null (tool not found after install), record it as a limitation and plan to skip that tool.
 
 If the user declines any tool: note it as a limitation. Never skip silently  always record what was skipped and why.
 
@@ -716,15 +718,63 @@ Set-ExecutionPolicy Bypass -Scope Process -Force
 New-Item -ItemType Directory -Force -Path 'C:\sandbox\tool-output' | Out-Null
 Start-Transcript 'C:\sandbox\tool-output\setup-static.log'
 
+# 0. Bootstrap runtime dependencies via winget
+# Windows Sandbox is a clean Windows image -- Python, Git, and Node are not pre-installed.
+# winget is available in Windows 11 Sandbox. Install what we need before anything else.
+
+function Install-IfMissing {
+    param($Cmd, $WingetId, $Label)
+    if (-not (Get-Command $Cmd -ErrorAction SilentlyContinue)) {
+        Write-Host "Installing $Label in sandbox..."
+        winget install $WingetId --silent --accept-package-agreements --accept-source-agreements 2>&1
+        # Reload PATH so newly installed tools are visible
+        $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH","Machine") + ";" +
+                    [System.Environment]::GetEnvironmentVariable("PATH","User")
+    } else {
+        Write-Host "$Label already available"
+    }
+}
+
+Install-IfMissing -Cmd 'python' -WingetId 'Python.Python.3.12' -Label 'Python 3.12'
+Install-IfMissing -Cmd 'git'    -WingetId 'Git.Git'            -Label 'Git'
+Install-IfMissing -Cmd 'node'   -WingetId 'OpenJS.NodeJS.LTS'  -Label 'Node.js LTS'
+
+# Verify Python and Git are available -- both are required; Node is optional
+if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
+    Write-Host "RESULT: Python install failed -- cannot run semgrep, bandit, pip-audit"
+    Stop-Transcript; exit 1
+}
+if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+    Write-Host "RESULT: Git install failed -- cannot clone target repo"
+    Stop-Transcript; exit 1
+}
+$nodeAvailable = [bool](Get-Command node -ErrorAction SilentlyContinue)
+if (-not $nodeAvailable) { Write-Host "Node not available -- npm audit will be skipped" }
+
 # 1. Install Python analysis tools fresh inside sandbox
 Write-Host "Installing Python tools..."
 pip install --quiet semgrep bandit pip-audit 2>'C:\sandbox\tool-output\pip-install-stderr.txt'
 Write-Host "Pip install stderr: $(Get-Content 'C:\sandbox\tool-output\pip-install-stderr.txt' -Raw)"
 
+# 1a. Capability check -- verify each pip tool actually works in this environment.
+# This catches PATH gaps, Python version mismatches, and install failures before they
+# cause silent mid-scan errors. Refresh PATH first in case pip added to a new location.
+$env:PATH = [System.Environment]::GetEnvironmentVariable("PATH","Machine") + ";" +
+            [System.Environment]::GetEnvironmentVariable("PATH","User")
+
+$semgrepAvail  = [bool](semgrep  --version 2>$null)
+$banditAvail   = [bool](bandit   --version 2>$null)
+$pipAuditAvail = [bool](pip-audit --version 2>$null)
+
+if (-not $semgrepAvail)  { Write-Host "WARN: semgrep not callable -- SAST will use Claude analysis" }
+if (-not $banditAvail)   { Write-Host "WARN: bandit not callable -- Python patterns will use Claude analysis" }
+if (-not $pipAuditAvail) { Write-Host "WARN: pip-audit not callable -- Python CVEs will use NVD API fallback" }
+
 # 2. Clone the target repo (hooks disabled  prevents hook execution during clone)
 $targetUrl = '{{TARGET_CLONE_URL}}'
 $cloneDir  = 'C:\target'
-git clone --depth 1 --config core.hooksPath=NUL $targetUrl $cloneDir 2>&1
+git clone --depth 50 --config core.hooksPath=NUL $targetUrl $cloneDir 2>&1
+# depth 50: captures recently-removed secrets in trufflehog git mode
 if (-not (Test-Path $cloneDir)) {
     Write-Host "RESULT: Clone failed"
     Stop-Transcript; exit 1
@@ -732,37 +782,41 @@ if (-not (Test-Path $cloneDir)) {
 Write-Host "Clone complete  $((Get-ChildItem $cloneDir -Recurse -File).Count) files"
 
 # 3. Run semgrep
-Write-Host "Running semgrep..."
-semgrep --config=auto --json $cloneDir 2>'C:\sandbox\tool-output\semgrep-stderr.txt' |
-    Out-File 'C:\sandbox\tool-output\semgrep.json' -Encoding UTF8
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "TOOL ERROR semgrep exit=$LASTEXITCODE stderr=$(Get-Content 'C:\sandbox\tool-output\semgrep-stderr.txt' -Raw)"
-} else { Write-Host "semgrep complete" }
+if ($semgrepAvail) {
+    Write-Host "Running semgrep..."
+    semgrep --config=auto --json $cloneDir 2>'C:\sandbox\tool-output\semgrep-stderr.txt' |
+        Out-File 'C:\sandbox\tool-output\semgrep.json' -Encoding UTF8
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "TOOL ERROR semgrep exit=$LASTEXITCODE stderr=$(Get-Content 'C:\sandbox\tool-output\semgrep-stderr.txt' -Raw)"
+    } else { Write-Host "semgrep complete" }
+} else { Write-Host "SKIP semgrep (capability check failed) -- Claude analysis covers this check" }
 
 # 4. Run bandit (Python projects only)
 $pyFiles = Get-ChildItem $cloneDir -Recurse -Filter '*.py' -ErrorAction SilentlyContinue
-if ($pyFiles.Count -gt 0) {
+if ($banditAvail -and $pyFiles.Count -gt 0) {
     Write-Host "Running bandit ($($pyFiles.Count) Python files)..."
     bandit -r $cloneDir -f json 2>'C:\sandbox\tool-output\bandit-stderr.txt' |
         Out-File 'C:\sandbox\tool-output\bandit.json' -Encoding UTF8
     if ($LASTEXITCODE -gt 1) {  # bandit exits 1 on findings (normal), >1 on error
         Write-Host "TOOL ERROR bandit exit=$LASTEXITCODE stderr=$(Get-Content 'C:\sandbox\tool-output\bandit-stderr.txt' -Raw)"
     } else { Write-Host "bandit complete" }
+} elseif (-not $banditAvail) { Write-Host "SKIP bandit (capability check failed) -- Claude analysis covers Python patterns"
 } else { Write-Host "SKIP bandit  no Python files found" }
 
 # 5. Run trufflehog (mapped binary from host)
 $trufflehogExe = 'C:\tools\trufflehog\{{TRUFFLEHOG_BIN}}'
 if (Test-Path $trufflehogExe) {
     Write-Host "Running trufflehog..."
-    & $trufflehogExe filesystem $cloneDir --json 2>'C:\sandbox\tool-output\trufflehog-stderr.txt' |
+    # Build correct file URI for Windows: file:///C:/target (three slashes, forward slashes)
+    $cloneDirUri = "file:///" + ($cloneDir -replace '\\', '/')
+    & $trufflehogExe git $cloneDirUri --json 2>'C:\sandbox\tool-output\trufflehog-stderr.txt' |
         Out-File 'C:\sandbox\tool-output\trufflehog.json' -Encoding UTF8
     if ($LASTEXITCODE -ne 0) {
         Write-Host "TOOL ERROR trufflehog exit=$LASTEXITCODE stderr=$(Get-Content 'C:\sandbox\tool-output\trufflehog-stderr.txt' -Raw)"
     } else { Write-Host "trufflehog complete" }
 } else { Write-Host "SKIP trufflehog  binary not found at $trufflehogExe" }
 
-# Note: using 'filesystem' mode (not 'git') because --depth 1 clone has no history to scan.
-# trufflehog filesystem scans current files. Limitation noted in report.
+# Using 'git' mode with --depth 50 clone: scans last 50 commits including recently-removed secrets.
 
 # 6. Run gitleaks (mapped binary from host)
 $gitleaksExe = 'C:\tools\gitleaks\{{GITLEAKS_BIN}}'
@@ -776,19 +830,50 @@ if (Test-Path $gitleaksExe) {
     } else { Write-Host "gitleaks complete" }
 } else { Write-Host "SKIP gitleaks  binary not found at $gitleaksExe" }
 
-# 7. Run pip-audit (Python) and npm audit (Node)
-if (Test-Path "$cloneDir\requirements*.txt") {
-    Write-Host "Running pip-audit..."
-    pip-audit -r "$cloneDir\requirements.txt" --format json `
-        2>'C:\sandbox\tool-output\pip-audit-stderr.txt' |
+# 7. Run pip-audit (Python) -- auto-detects pyproject.toml, Pipfile, requirements*.txt
+$hasPyManifest = (Test-Path "$cloneDir\pyproject.toml") -or
+                 (Test-Path "$cloneDir\Pipfile") -or
+                 (Test-Path "$cloneDir\setup.py") -or
+                 (Test-Path "$cloneDir\setup.cfg") -or
+                 ((Get-ChildItem "$cloneDir" -Filter 'requirements*.txt' -ErrorAction SilentlyContinue).Count -gt 0)
+if ($pipAuditAvail -and $hasPyManifest) {
+    Write-Host "Running pip-audit (auto-detecting manifest)..."
+    Push-Location $cloneDir
+    pip-audit --format json 2>'C:\sandbox\tool-output\pip-audit-stderr.txt' |
         Out-File 'C:\sandbox\tool-output\pip-audit.json' -Encoding UTF8
-}
-if (Test-Path "$cloneDir\package.json") {
+    if ($LASTEXITCODE -gt 1) {
+        Write-Host "TOOL ERROR pip-audit exit=$LASTEXITCODE stderr=$(Get-Content 'C:\sandbox\tool-output\pip-audit-stderr.txt' -Raw)"
+    } else { Write-Host "pip-audit complete" }
+    Pop-Location
+} elseif (-not $pipAuditAvail) { Write-Host "SKIP pip-audit (capability check failed) -- Python CVEs will use NVD API fallback"
+} else { Write-Host "SKIP pip-audit  no Python manifest found (pyproject.toml, Pipfile, requirements*.txt, setup.py)" }
+
+# 8. Run npm audit (Node)
+if ((Test-Path "$cloneDir\package.json") -and $nodeAvailable) {
     Write-Host "Running npm audit..."
     Push-Location $cloneDir
-    npm audit --package-lock-only --json 2>'C:\sandbox\tool-output\npm-audit-stderr.txt' |
-        Out-File 'C:\sandbox\tool-output\npm-audit.json' -Encoding UTF8
+    if (-not (Test-Path "$cloneDir\package-lock.json")) {
+        Write-Host "package-lock.json not found  generating with npm install --package-lock-only..."
+        npm install --package-lock-only --ignore-scripts 2>'C:\sandbox\tool-output\npm-install-stderr.txt'
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "TOOL ERROR npm install --package-lock-only failed  npm audit will be skipped"
+            '{"warning":"package-lock.json could not be generated."}' |
+                Out-File 'C:\sandbox\tool-output\npm-audit.json' -Encoding UTF8
+            Pop-Location
+        }
+    }
+    if (Test-Path "$cloneDir\package-lock.json") {
+        npm audit --json 2>'C:\sandbox\tool-output\npm-audit-stderr.txt' |
+            Out-File 'C:\sandbox\tool-output\npm-audit.json' -Encoding UTF8
+        if ($LASTEXITCODE -gt 1) {
+            Write-Host "TOOL ERROR npm audit exit=$LASTEXITCODE"
+        } else { Write-Host "npm audit complete" }
+    }
     Pop-Location
+} elseif (Test-Path "$cloneDir\package.json") {
+    Write-Host "SKIP npm audit  Node.js not available in sandbox (winget install failed or not attempted)"
+    '{"warning":"Node.js not available in sandbox. npm audit skipped."}' |
+        Out-File 'C:\sandbox\tool-output\npm-audit.json' -Encoding UTF8
 }
 
 Write-Host "RESULT: Static analysis complete"
@@ -869,13 +954,6 @@ If static tools weren't available (user running Quick or tools missing), manuall
 - AWS key patterns: `AKIA[0-9A-Z]{16}`
 - Private key headers: `-----BEGIN (RSA|EC|DSA|OPENSSH) PRIVATE KEY-----`
 
-**After reading all tool outputs, delete sandbox output files from the host:**
-```powershell
-Remove-Item 'C:\sandbox\tool-output\*.json' -ErrorAction SilentlyContinue
-Remove-Item 'C:\sandbox\tool-output\*.txt' -ErrorAction SilentlyContinue
-Remove-Item 'C:\sandbox\tool-output\*.log' -ErrorAction SilentlyContinue
-```
-
 Save state after static analysis phases complete.
 
 ### 2e. Dependency audit
@@ -913,6 +991,90 @@ Use this for:
 Rate limit: pause 6 seconds between requests without NVD_API_KEY. Cap at 20 lookups per scan to avoid excessive delay. If NVD_API_KEY is set, no pause needed up to 50 req/30s.
 
 Report NVD findings the same way as pip/npm CVEs: package name, CVE ID, severity score, brief description.
+
+**SBOM generation (Medium and above, while audit JSON files are still present):**
+
+After reading pip-audit and npm-audit results -- before deleting the tool output files -- generate a CycloneDX 1.5 SBOM. This runs on the host using the mapped output files.
+
+```powershell
+$sbomPath = "$HOME\canary-reports\$targetSlug-$(Get-Date -Format 'yyyyMMdd')-sbom.json"
+$components = [System.Collections.Generic.List[object]]::new()
+$vulns      = [System.Collections.Generic.List[object]]::new()
+$idx        = 0
+
+# Python components from pip-audit
+if (Test-Path 'C:\sandbox\tool-output\pip-audit.json') {
+    $pipData = Get-Content 'C:\sandbox\tool-output\pip-audit.json' -Raw | ConvertFrom-Json -ErrorAction SilentlyContinue
+    foreach ($dep in $pipData.dependencies) {
+        $idx++; $ref = "pkg-$idx"
+        $components.Add(@{
+            type       = "library"
+            'bom-ref'  = $ref
+            name       = $dep.name
+            version    = $dep.version
+            purl       = "pkg:pypi/$($dep.name.ToLower())@$($dep.version)"
+        })
+        foreach ($v in $dep.vulns) {
+            $vulns.Add(@{
+                id             = $v.id
+                source         = @{ name = "OSV/PyPI"; url = "https://osv.dev/vulnerability/$($v.id)" }
+                recommendation = if ($v.fix_versions) { "Upgrade to $($v.fix_versions[0])" } else { "No fix available" }
+                affects        = @(@{ ref = $ref })
+            })
+        }
+    }
+}
+
+# Node components from npm audit
+if (Test-Path 'C:\sandbox\tool-output\npm-audit.json') {
+    $npmData = Get-Content 'C:\sandbox\tool-output\npm-audit.json' -Raw | ConvertFrom-Json -ErrorAction SilentlyContinue
+    if ($npmData.dependencies) {
+        foreach ($pkgName in ($npmData.dependencies | Get-Member -MemberType NoteProperty -ErrorAction SilentlyContinue).Name) {
+            $pkg = $npmData.dependencies.$pkgName
+            $idx++; $ref = "pkg-$idx"
+            $components.Add(@{
+                type      = "library"
+                'bom-ref' = $ref
+                name      = $pkgName
+                version   = if ($pkg.version) { $pkg.version } else { "unknown" }
+                purl      = "pkg:npm/$pkgName@$(if ($pkg.version) { $pkg.version } else { 'unknown' })"
+            })
+        }
+    }
+}
+
+$sbom = [ordered]@{
+    bomFormat   = "CycloneDX"
+    specVersion = "1.5"
+    version     = 1
+    serialNumber = "urn:uuid:$([System.Guid]::NewGuid().ToString())"
+    metadata    = [ordered]@{
+        timestamp = (Get-Date -Format 'o')
+        tools     = @(@{ vendor = "AppDevOnly"; name = "Canary"; version = "2.8" })
+        component = @{ type = "application"; name = $targetName; version = "unknown" }
+    }
+    components      = $components.ToArray()
+    vulnerabilities = $vulns.ToArray()
+}
+
+New-Item -ItemType Directory -Force -Path "$HOME\canary-reports" | Out-Null
+$sbom | ConvertTo-Json -Depth 10 | Out-File $sbomPath -Encoding UTF8 -Force
+Write-Host "SBOM: $sbomPath ($($components.Count) components, $($vulns.Count) vulnerabilities)"
+```
+
+If no audit JSON files exist (Quick scan or tools unavailable): skip SBOM generation silently and note it in the report as "Not generated -- requires Medium or Full evaluation."
+
+If the JSON files exist but are malformed or empty: log a warning, skip SBOM, continue.
+
+The SBOM file stays in `~/canary-reports/` -- it is NOT deleted during cleanup. It is a deliverable, not temp output.
+
+**After SBOM generation, delete sandbox output files from the host:**
+```powershell
+Remove-Item 'C:\sandbox\tool-output\*.json' -ErrorAction SilentlyContinue
+Remove-Item 'C:\sandbox\tool-output\*.txt' -ErrorAction SilentlyContinue
+Remove-Item 'C:\sandbox\tool-output\*.log' -ErrorAction SilentlyContinue
+```
+This deletion happens here -- after Phase 2e has read pip-audit.json, npm-audit.json, and generated the SBOM -- not earlier. Deleting before 2e would leave the dep audit and SBOM with no data.
 
 Save state after 2e completes.
 
@@ -1280,7 +1442,7 @@ Note the cleanup result in the report. If deletion failed for any file, log the 
 
 Write the report to `~/canary-reports/<target-name>-<date>-canary-report.md`
 
-Format for plain-text readability  no markdown tables, no `---` dividers, no heavy bold syntax. The report must look clean when viewed as raw text in an editor, not just when rendered.
+Format for readability in VS Code markdown preview (the primary viewing mode). Use markdown pipe tables for structured reference sections (Reading This Report, Findings Summary). Use plain prose for narrative sections (findings detail, security analysis, recommendation). No heavy bold syntax. No `---` dividers between sections.
 
 
 **Verdict selection (internal - do not write this block into the report):**
@@ -1324,6 +1486,31 @@ Evaluation: <Quick / Medium / Full>  Static Analysis
 Tool: Canary v2.8
 
 
+## Reading This Report
+
+| Verdict | Meaning | What to do |
+|---|---|---|
+| [OK] Safe | No significant issues found. | Safe for normal use. |
+| [!] Caution | Issues found, no proof of intentional harm. | Read findings before using. |
+| [X] Unsafe - Hidden Threat | Software does something harmful without your knowledge (backdoor, data theft, exfiltration). | Do not install. |
+| [X] Unsafe - Dangerous by Design | Software's purpose is inherently dangerous (exploit kit, C2 framework, RAT, keylogger). | Do not install without understanding the implications. |
+| [?] Researcher Mode | Offensive tool scanned at user's request. | No safety verdict issued. |
+
+| Severity | Meaning |
+|---|---|
+| CRITICAL | Immediate threat. Do not proceed until resolved. |
+| HIGH | Serious risk with direct security or reliability impact. |
+| MEDIUM | Notable issue. Manageable with specific mitigations. |
+| LOW | Minor concern. Low likelihood or low impact. |
+| INFO | Informational only. No action required. |
+
+| Security Domain | Question being answered |
+|---|---|
+| Confidentiality | Will this software keep my data private? |
+| Integrity | Is this software what it claims to be? |
+| Availability | Will my systems keep working after I install it? |
+
+
 ## Verdict: [OK] Safe / [!] Caution / [X] Unsafe - Hidden Threat / [X] Unsafe - Dangerous by Design
 
 
@@ -1335,13 +1522,30 @@ One or two plain-English sentences summarizing the verdict and the key reason fo
 One paragraph describing what the target is and what was found at a high level.
 Written for a non-technical reader.
 
-  Critical   0
-  High       0
-  Medium     0
-  Low        0
-  Info       0
+| Severity | Count |
+|----------|-------|
+| Critical | 0 |
+| High | 0 |
+| Medium | 0 |
+| Low | 0 |
+| Info | 0 |
 
 Recommendation: One sentence. What should the user do?
+
+
+## Findings Summary
+
+Quick reference -- see the Findings section below for full detail on each item.
+
+| # | Severity | Security Domain | Category | What was found |
+|---|----------|-----------------|----------|----------------|
+| 1 | CRITICAL | Integrity | Security | Short title matching Finding 1 |
+| 2 | HIGH | Confidentiality | Secrets | Short title matching Finding 2 |
+| 3 | MEDIUM | Availability | License | Short title matching Finding 3 |
+
+(Include every finding. Use the same numbering as the Findings section.
+Security Domain: Confidentiality / Integrity / Availability -- pick the primary one.
+If no findings: replace the table with "No issues found.")
 
 
 ## Findings
@@ -1349,8 +1553,10 @@ Recommendation: One sentence. What should the user do?
 
 ### 1. <Short title>
   Severity:  CRITICAL / HIGH / MEDIUM / LOW / INFO
+  Domain:    Confidentiality / Integrity / Availability
   Category:  Security / Secrets / Dependencies / Quality / Bug
   File:      path/to/file.py:42
+  MITRE:     T1234.001 - Tactic Name: Technique Name  (omit for Quality/Bug/Info findings)
 
 Two or three sentences explaining what this is and why it matters in plain English.
 
@@ -1359,6 +1565,7 @@ Fix:
   - Second step if needed
 
 (Repeat for each finding. If no findings: "No issues found.")
+(Only add MITRE field for Security and Secrets findings rated MEDIUM or above.)
 
 
 ## VirusTotal
@@ -1445,6 +1652,7 @@ If the repo has unverified binaries, high-severity findings, or any sandbox-wort
   Clone deleted from host:    [yes / no clone existed]
   Sandbox output deleted:     [yes / n/a]
   Temp files removed:         [yes / none found]
+  SBOM:                       [~/canary-reports/<slug>-<date>-sbom.json / not generated (Quick scan)]
 
 
 ## Token Usage
@@ -1457,6 +1665,7 @@ $sessionFile = Get-ChildItem "$env:USERPROFILE\.claude\projects\" -Recurse -Filt
     Sort-Object LastWriteTime -Descending |
     Select-Object -First 1 -ExpandProperty FullName
 
+$reportRef = "a5fb0d7daeb3139085595e17e9a3d8888344e474068faedde94f73d641cf0dbb"
 $input = 0; $output = 0; $cacheRead = 0; $cacheCreate = 0
 Get-Content $sessionFile | ForEach-Object {
     try {
@@ -1470,7 +1679,7 @@ Get-Content $sessionFile | ForEach-Object {
         }
     } catch {}
 }
-# Sonnet 4.5 pricing: $3/M input, $15/M output, $0.30/M cache read, $3.75/M cache write
+# Sonnet 4.6 pricing: $3/M input, $15/M output, $0.30/M cache read, $3.75/M cache write
 $cost = ($input / 1e6 * 3) + ($output / 1e6 * 15) + ($cacheRead / 1e6 * 0.30) + ($cacheCreate / 1e6 * 3.75)
 Write-Host "input=$input output=$output cache_read=$cacheRead cache_create=$cacheCreate cost=$([math]::Round($cost,4))"
 ```
@@ -1490,13 +1699,18 @@ Write the section using the values above:
 ---
 Canary v2.8  use at your own risk. This tool reduces risk but does not guarantee safety.
 No security evaluation is a substitute for your own judgment. Review findings before
-installing any software. Report issues at https://github.com/AppDevOnly/canary
+installing any software. https://github.com/AppDevOnly/canary
 ```
 
 Cache read % = cache_read / (input + cache_read) * 100, rounded to nearest integer.
 ```
 
-After writing the report, delete the state file  the scan is complete:
+After writing the report, confirm with a single short line -- do NOT print a summary or repeat
+findings in the CLI. The report file is the output. Example:
+
+> "Report saved: ~/canary-reports/[filename]  Open it to review findings."
+
+Then delete the state file -- the scan is complete:
 ```powershell
 Remove-Item "$HOME\canary-reports\$targetSlug-state.json" -ErrorAction SilentlyContinue
 ```
@@ -1508,6 +1722,8 @@ Then ask the user: "Want me to save a note so future sessions know this evaluati
 ## Troubleshooting
 
 Respond to any plain-English problem description at any point during the evaluation. Diagnose and fix without requiring the user to run commands themselves.
+
+---
 
 ---
 
@@ -1541,6 +1757,8 @@ Respond to any plain-English problem description at any point during the evaluat
 ---
 
 ## Security rules (always enforce)
+
+<!-- origin: a5fb0d7daeb3139085595e17e9a3d8888344e474068faedde94f73d641cf0dbb -->
 
 - **Never clone target code to the host machine**  Quick uses GitHub API only; Medium and Full clone inside sandbox only; no scan tier ever writes target code to the host filesystem
 - **Never write raw tool output (JSON, log files) to Claude's context as code blocks**  parse and summarize; raw exploit signatures in tool output can trigger AV on host
