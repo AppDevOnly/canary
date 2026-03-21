@@ -113,6 +113,48 @@ If the PR has no risky changes: "[OK] Safe - No supply chain risks found in this
 **Always use `gh api <endpoint> --jq '<filter>'` for GitHub API calls and JSON parsing.** Do not use standalone `jq`, `python3`, or `python` for JSON parsing  they are not reliably available on Windows. If you need to parse JSON outside of a `gh api` call, use `grep` or string matching instead.
 
 
+## Key setup
+
+Canary uses four optional API keys. All are free. None should ever be stored in plaintext
+files or hardcoded anywhere -- canary flags that practice as HIGH in other software, so
+it must not do it itself.
+
+**Secure storage (one-time setup, Windows):**
+
+```powershell
+# Install Microsoft's official secret vault (encrypted via Windows DPAPI)
+Install-Module Microsoft.PowerShell.SecretManagement, Microsoft.PowerShell.SecretStore -Scope CurrentUser -Force
+Register-SecretVault -Name CanaryVault -ModuleName Microsoft.PowerShell.SecretStore -DefaultVault
+Set-SecretStoreConfiguration -Authentication None -Interaction None -Confirm:$false
+
+# Store each key (run once per key)
+Set-Secret -Name VT_API_KEY      -Secret 'your-key' -Vault CanaryVault
+Set-Secret -Name NVD_API_KEY     -Secret 'your-key' -Vault CanaryVault
+Set-Secret -Name GITLAB_TOKEN    -Secret 'your-key' -Vault CanaryVault
+Set-Secret -Name BITBUCKET_TOKEN -Secret 'your-key' -Vault CanaryVault
+
+# Add to PowerShell profile so keys load at shell startup
+# (decrypts at load time -- no plaintext in the profile file)
+$keys = @('VT_API_KEY','NVD_API_KEY','GITLAB_TOKEN','BITBUCKET_TOKEN')
+foreach ($k in $keys) {
+    try { [System.Environment]::SetEnvironmentVariable($k, (Get-Secret -Name $k -Vault CanaryVault -AsPlainText -ErrorAction Stop), 'Process') } catch {}
+}
+```
+
+| Key | Purpose | Get it at |
+|---|---|---|
+| VT_API_KEY | Binary/URL AV scan (70+ engines) | virustotal.com -- Profile > API Key (free, 500/day) |
+| NVD_API_KEY | CVE lookups at higher rate limit | nvd.nist.gov/developers/request-an-api-key (free) |
+| GITLAB_TOKEN | Private GitLab repo access | gitlab.com/-/user_settings/personal_access_tokens (read_api) |
+| BITBUCKET_TOKEN | Private Bitbucket repo access | bitbucket.org/account/settings/app-passwords (Repositories: Read) |
+
+All keys are optional. Canary works without them -- missing keys reduce coverage and are noted in the report.
+
+If a user tries to set a key in plaintext (e.g. `$env:VT_API_KEY = 'key'` directly in their profile), warn them:
+> "Storing API keys as plaintext in your profile is the same pattern canary flags as HIGH in other software. Use the SecretManagement setup above to store it encrypted instead."
+
+---
+
 ## Phase 0  Resume check
 
 Before doing anything else, check for an existing partial scan of this target.
@@ -156,8 +198,8 @@ Parse `<target>`:
 - **`npm:<name>`**  fetch from npmjs: read package.json, scripts, index
 - **`cargo:<name>`**  fetch from crates.io: read Cargo.toml, src/lib.rs, src/main.rs [Quick only - no sandbox or dep audit support]
 - **`nuget:<name>`**  fetch from nuget.org: read .nuspec and package metadata [Quick only - no sandbox or dep audit support]
-- **GitLab URL** (`https://gitlab.com/...`)  use GitLab API (`https://gitlab.com/api/v4/projects/<encoded-path>/repository/tree`); requires `GITLAB_TOKEN` env var for private repos
-- **Bitbucket URL** (`https://bitbucket.org/...`)  use Bitbucket API (`https://api.bitbucket.org/2.0/repositories/<owner>/<slug>/src`); requires `BITBUCKET_TOKEN` for private repos
+- **GitLab URL** (`https://gitlab.com/...`)  use GitLab API (`https://gitlab.com/api/v4/projects/<encoded-path>/repository/tree`); requires `GITLAB_TOKEN` env var for private repos (store securely -- see Key setup below)
+- **Bitbucket URL** (`https://bitbucket.org/...`)  use Bitbucket API (`https://api.bitbucket.org/2.0/repositories/<owner>/<slug>/src`); requires `BITBUCKET_TOKEN` for private repos (store securely -- see Key setup below)
 - **Docker Hub** (`docker:<image>`)  fetch image metadata and check base image CVEs via Docker Hub API [Quick only - no layer scanning]
 - **VS Code extension** (`vscode:<publisher.name>`)  fetch from VS Code Marketplace API, check manifest and scripts [Quick only - no sandbox support]
 
@@ -423,9 +465,19 @@ powershell -NoProfile -File 'C:\temp\check-vt.ps1'
 If not set:
 > "VirusTotal integration isn't configured  I won't be able to check pre-compiled binaries against 70+ AV engines. This is especially important for repos that ship .exe or .dll files.
 >
-> To enable it: sign up free at https://www.virustotal.com, go to your profile  API Key, copy it, then set it with:
-> `$env:VT_API_KEY = 'your-key-here'`
-> Or add it to your PowerShell profile for persistence.
+> To enable it: sign up free at https://www.virustotal.com, go to your profile  API Key, copy it.
+> Then store it securely (never paste API keys into files in plaintext):
+>
+> ```powershell
+> # One-time setup -- stores key encrypted via Windows DPAPI
+> Install-Module Microsoft.PowerShell.SecretManagement, Microsoft.PowerShell.SecretStore -Scope CurrentUser -Force
+> Register-SecretVault -Name CanaryVault -ModuleName Microsoft.PowerShell.SecretStore -DefaultVault
+> Set-SecretStoreConfiguration -Authentication None -Interaction None -Confirm:$false
+> Set-Secret -Name VT_API_KEY -Secret 'your-key-here' -Vault CanaryVault
+>
+> # Add this to your PowerShell profile so it loads automatically:
+> $env:VT_API_KEY = Get-Secret -Name VT_API_KEY -Vault CanaryVault -AsPlainText
+> ```
 >
 > Free tier gives 500 lookups/day  plenty for normal canary use. Continue without it?"
 
@@ -974,7 +1026,7 @@ If audit tools were unavailable and no output file exists, manually check depend
 
 **NVD API - CVE lookup for non-pip/npm dependencies (C++ libs, system packages, Go modules, etc.):**
 
-For dependencies that pip-audit and npm audit don't cover, query the NIST NVD API directly. Free, no key required (rate-limited to 5 req/30s without key; optional `NVD_API_KEY` raises limit to 50 req/30s).
+For dependencies that pip-audit and npm audit don't cover, query the NIST NVD API directly. Free, no key required (rate-limited to 5 req/30s without key; optional `NVD_API_KEY` raises limit to 50 req/30s). Store NVD_API_KEY securely -- see Key setup section.
 
 ```bash
 # Look up CVEs for a specific package + version
