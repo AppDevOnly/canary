@@ -54,7 +54,7 @@ powershell -ExecutionPolicy Bypass -File install.ps1
 
 **Current SHA256 hashes:**
 ```
-install.ps1   22f9c0092faf19ba36a1aa7dcdc35226dc8735c3c1cbeb0cdd4a6115f1c10ed4
+install.ps1   ebe54599b3acc0f99fd3cc502a91804c1555c5510bff01fe74acf150b729d5bb
 ```
 
 > [!] The main risk with `irm | iex` is a compromised AppDevOnly account -- a supply chain attack could replace install.ps1 with something malicious. Verifying the hash guards against that. Hashes are updated with each release.
