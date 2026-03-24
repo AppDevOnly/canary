@@ -2856,6 +2856,79 @@ Flag unexpected chains as HIGH. Include the full ancestry in the report: `target
 
 Take the Autoruns diff after the sandbox closes and flag any new persistence entries as HIGH.
 
+**Browser targeting checks (review Procmon log after sandbox closes):**
+
+Look for these specific patterns in the Procmon CSV output. Each warrants a HIGH finding if observed:
+
+```powershell
+# Browser profile writes -- credential theft or extension injection
+$browserPaths = @(
+    '*\Google\Chrome\User Data\*',
+    '*\Mozilla\Firefox\Profiles\*',
+    '*\Microsoft\Edge\User Data\*',
+    '*\BraveSoftware\Brave-Browser\User Data\*'
+)
+$events | Where-Object {
+    $_.Operation -match 'WriteFile|CreateFile' -and
+    ($browserPaths | Where-Object { $_.Path -like $_ })
+} | ForEach-Object { Write-Host "BROWSER WRITE: $($_.Path) by $($_.ProcessName)" }
+
+# Browser shortcut modification -- adding --load-extension or URLs to .lnk files
+$events | Where-Object {
+    $_.Operation -match 'WriteFile' -and
+    $_.Path -match '\.lnk$'
+} | ForEach-Object { Write-Host "SHORTCUT WRITE: $($_.Path) by $($_.ProcessName)" }
+
+# Clipboard access
+$events | Where-Object {
+    $_.Operation -match 'OpenSection|ReadFile' -and
+    ($_.Path -match 'Clipboard|cbsrv' -or $_.Detail -match 'clipboard')
+} | ForEach-Object { Write-Host "CLIPBOARD ACCESS: $($_.Path) by $($_.ProcessName)" }
+
+# Capture device access (webcam, microphone)
+$events | Where-Object {
+    $_.Path -match '\\Device\\00' -and
+    $_.Operation -match 'CreateFile'
+} | ForEach-Object { Write-Host "DEVICE ACCESS: $($_.Path) by $($_.ProcessName)" }
+```
+
+**Anti-sandbox detection (flag as HIGH -- behavior in the wild may differ):**
+
+```powershell
+# Checks for known sandbox artifacts in registry or process list
+$sandboxIndicators = @(
+    '*Procmon*', '*VBoxHook*', '*vmtoolsd*', '*vmsrvc*', '*vmusrvc*',
+    '*Sandboxie*', '*wireshark*', '*fiddler*'
+)
+$events | Where-Object {
+    $_.Operation -match 'RegOpenKey|RegQueryValue|OpenProcess' -and
+    ($sandboxIndicators | Where-Object { $_.Detail -ilike $_ -or $_.Path -ilike $_ })
+} | ForEach-Object { Write-Host "SANDBOX CHECK: $($_.Operation) $($_.Path) by $($_.ProcessName)" }
+```
+
+**DNS-over-HTTPS bypass (check tshark output):**
+
+After parsing normal DNS traffic, separately check for HTTPS connections to known DoH resolvers.
+These hide DNS queries from the standard tshark DNS capture:
+
+```powershell
+$dohResolvers = @('1.1.1.1','1.0.0.1','8.8.8.8','8.8.4.4','9.9.9.9','149.112.112.112',
+                  '94.140.14.14','94.140.15.15','208.67.222.222','208.67.220.220')
+$dohConnections = Get-Content 'C:\sandbox\tool-output\network-vswitch.log' | ForEach-Object {
+    $p = $_ -split '\|'
+    if ($p[2] -in $dohResolvers -and $p[4] -eq '443') {
+        "HTTPS to DoH resolver $($p[2]) -- DNS queries may be hidden from capture"
+    }
+}
+if ($dohConnections) {
+    $dohConnections | ForEach-Object { Write-Host "HIGH: $_" }
+}
+```
+
+If any DoH connections are found: flag HIGH. The software is deliberately bypassing standard
+DNS monitoring. Actual DNS queries made via DoH are not visible in the capture -- note this
+as a coverage gap in the Sandbox Results section.
+
 Save state after Phase 4 completes (record `sac_original_state` in state file).
 
 ---
@@ -3018,6 +3091,16 @@ One or two plain-English sentences summarizing the verdict and the key reason fo
 
 One paragraph describing what the target is and what was found at a high level.
 Written for a non-technical reader.
+
+If the scan operated under a meaningful limitation, include one short sentence here
+stating what was and wasn't covered. Keep it factual and brief -- do not list every
+possible gap or caveat. Examples of appropriate scope notes:
+- "This is a static analysis only -- runtime behavior was not observed."
+- "Quick scan: entry points and install scripts reviewed; full codebase not read."
+- "File count capped at 500 of 1,200 total; automated tools covered the full repo."
+- "Email headers and URLs analyzed; linked pages were not fetched."
+Omit this note entirely if the scan was complete for its tier (e.g. a Full scan with
+all tools available and no caps hit).
 
 | Severity | Count |
 |----------|-------|
