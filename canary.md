@@ -1375,6 +1375,10 @@ If no target is provided, show this welcome message:
 > I'll ask which level fits your situation after you share a target.
 > (Reviewing a pull request or email? Those always run at a fixed depth -- no choice needed.)
 >
+> Stuck or not sure what to do? Just describe what you're seeing in plain English --
+> something like "I got a weird email" or "I found this on GitHub and I don't know if it's
+> safe." I'll figure out what to check and walk you through it.
+>
 > What would you like me to check?"
 
 **Offensive repo check:** Before presenting tier options, check the repo name and description for offensive security indicators: keywords such as `0day`, `exploit`, `poc`, `payload`, `shellcode`, `RAT`, `C2`, `backdoor`, `EXP`, `CVE` in the repo name, or descriptions mentioning "exploit collection", "proof of concept", or "offensive". If found:
