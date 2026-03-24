@@ -49,13 +49,21 @@ function Stop-Sandbox {
         Start-Sleep -Seconds 3
     }
 
-    $deadline = (Get-Date).AddSeconds(20)
+    # vmmemWindowsSandbox can persist for 60-120s after a forced kill.
+    # Launching a new sandbox while vmmem is alive causes mapped-folder mounting to fail silently.
+    # Wait up to 120s; if still present after that, warn the user and stop -- do not launch.
+    $deadline = (Get-Date).AddSeconds(120)
+    $elapsed = 0
     while ((Get-Date) -lt $deadline) {
         if (-not (Get-Process vmmemWindowsSandbox -ErrorAction SilentlyContinue)) { break }
-        Start-Sleep -Seconds 2
+        Start-Sleep -Seconds 5
+        $elapsed += 5
+        if ($elapsed % 20 -eq 0) {
+            Log "Still waiting for vmmemWindowsSandbox to exit (${elapsed}s)..." 'watchdog' 'Yellow'
+        }
     }
     if (Get-Process vmmemWindowsSandbox -ErrorAction SilentlyContinue) {
-        Log 'WARNING: vmmemWindowsSandbox still present after timeout — proceeding anyway.' 'watchdog' 'Yellow'
+        Log 'WARNING: vmmemWindowsSandbox still present after 120s. Close the Windows Sandbox window manually, then retry.' 'watchdog' 'Red'
     }
 
     Log 'Sandbox stopped.' 'watchdog' 'Yellow'
@@ -123,7 +131,11 @@ function Start-Sandbox-And-VSwitch {
     $deadline = (Get-Date).AddSeconds(60)
     while ((Get-Date) -lt $deadline) {
         if (Get-Process -Name 'WindowsSandboxRemoteSession','WindowsSandboxClient' -ErrorAction SilentlyContinue) { break }
-        Start-Sleep -Seconds 2
+        Start-Sleep -Seconds 5
+        $elapsed += 5
+        if ($elapsed % 20 -eq 0) {
+            Log "Still waiting for vmmemWindowsSandbox to exit (${elapsed}s)..." 'watchdog' 'Yellow'
+        }
     }
 
     Log 'Waiting for sandbox NIC...' 'watchdog'
@@ -132,7 +144,11 @@ function Start-Sandbox-And-VSwitch {
     while ((Get-Date) -lt $deadline) {
         $nic = Get-NetAdapter -Name 'vEthernet (Default Switch)' -ErrorAction SilentlyContinue
         if ($nic -and $nic.Status -eq 'Up') { $nicUp = $true; break }
-        Start-Sleep -Seconds 2
+        Start-Sleep -Seconds 5
+        $elapsed += 5
+        if ($elapsed % 20 -eq 0) {
+            Log "Still waiting for vmmemWindowsSandbox to exit (${elapsed}s)..." 'watchdog' 'Yellow'
+        }
     }
     if (-not $nicUp) { Log 'WARNING: vEthernet (Default Switch) not Up after 60s' 'watchdog' 'Yellow' }
     Start-Sleep -Seconds 3
@@ -178,7 +194,11 @@ if (Test-Path $PidFile) {
         if ($oldProc) {
             Write-Host "[watchdog] WARNING: Another watchdog instance (PID $oldPid) is running. Killing it first." -ForegroundColor Yellow
             Stop-Process -Id $oldPid -Force -ErrorAction SilentlyContinue
-            Start-Sleep -Seconds 2
+            Start-Sleep -Seconds 5
+        $elapsed += 5
+        if ($elapsed % 20 -eq 0) {
+            Log "Still waiting for vmmemWindowsSandbox to exit (${elapsed}s)..." 'watchdog' 'Yellow'
+        }
         }
     }
     Remove-Item $PidFile -Force -ErrorAction SilentlyContinue
@@ -306,7 +326,11 @@ for ($attempt = 1; $attempt -le $MaxRetries; $attempt++) {
             break
         }
 
-        Start-Sleep -Seconds 2
+        Start-Sleep -Seconds 5
+        $elapsed += 5
+        if ($elapsed % 20 -eq 0) {
+            Log "Still waiting for vmmemWindowsSandbox to exit (${elapsed}s)..." 'watchdog' 'Yellow'
+        }
     }
 
     if ($success) { break }

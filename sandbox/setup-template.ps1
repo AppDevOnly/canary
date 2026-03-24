@@ -125,8 +125,15 @@ try {
     }
     Write-Host "Process started: PID $($proc.Id)"
 } catch {
-    Write-Host "RESULT: Binary could not be launched. Possible causes: SAC/WDAC policy, missing dependency, corrupt binary."
-    Write-Host "Error: $($_.Exception.GetType().Name): $($_.Exception.Message)"
+    $errMsg = $_.Exception.Message
+    if ($errMsg -match 'Application Control|WDAC|policy has blocked|WinError 4551') {
+        Write-Host "RESULT: Binary blocked -- WDAC/Application Control policy"
+        Write-Host "The sandbox has its own Application Control enforcement independent of host SAC."
+        Write-Host "Error: $($_.Exception.GetType().Name): $errMsg"
+    } else {
+        Write-Host "RESULT: Binary could not be launched. Possible causes: missing dependency, corrupt binary."
+        Write-Host "Error: $($_.Exception.GetType().Name): $errMsg"
+    }
     Stop-Transcript
     "done" | Out-File $Sentinel -Encoding UTF8 -Force
     exit 1
