@@ -1,9 +1,9 @@
 # Canary Threat Report: We've blocked your account! Your photos and videos will be deleted -- [X] Phishing
 
 Date: 2026-03-24
-Target: heidi.b.bernstein@gmail.com, blocked-account-icloud-phish.eml
+Target: victim@example.com, blocked-account-icloud-phish.eml
 Sent: Mon, 23 Mar 2026 12:12:14 +0000
-From: heidi.b.bernstein <ujqmwmk@vwjlqjys.mlpoydgzeg.fexorlink.biz>
+From: victim <ujqmwmk@vwjlqjys.mlpoydgzeg.fexorlink.biz>
 Evaluation: Email threat analysis
 Tool: Canary v2.8
 
@@ -41,7 +41,7 @@ This is a fake Apple iCloud payment notice designed to steal your Apple ID and p
 
 ## Executive Summary
 
-This email impersonates Apple iCloud, threatening deletion of photos and videos unless the recipient updates their payment method immediately. The "Update my payment details" link resolves to a phishing page hosted in a Google Cloud Storage bucket (`storage.googleapis.com/ous2gsjdhx/`) -- an attacker-controlled bucket using Google's domain to appear trustworthy. The email was not sent by Apple; it originated from `fexorlink.biz` infrastructure using a Brazilian-hosted server that is listed on Spamhaus's Policy Block List. The body text uses character-level HTML obfuscation (each letter in a separate `<span>` tag) to defeat keyword-scanning spam filters, and embeds hundreds of lines of irrelevant scraped text in a hidden element to confuse machine-learning classifiers. The sender's display name is set to the recipient's own username (`heidi.b.bernstein`) -- a social engineering trick to create confusion about the source of the email. Three infrastructure components are flagged as malicious across VirusTotal and Spamhaus.
+This email impersonates Apple iCloud, threatening deletion of photos and videos unless the recipient updates their payment method immediately. The "Update my payment details" link resolves to a phishing page hosted in a Google Cloud Storage bucket (`storage.googleapis.com/ous2gsjdhx/`) -- an attacker-controlled bucket using Google's domain to appear trustworthy. The email was not sent by Apple; it originated from `fexorlink.biz` infrastructure using a Brazilian-hosted server that is listed on Spamhaus's Policy Block List. The body text uses character-level HTML obfuscation (each letter in a separate `<span>` tag) to defeat keyword-scanning spam filters, and embeds hundreds of lines of irrelevant scraped text in a hidden element to confuse machine-learning classifiers. The sender's display name is set to the recipient's own username (`victim`) -- a social engineering trick to create confusion about the source of the email. Three infrastructure components are flagged as malicious across VirusTotal and Spamhaus.
 
 | Severity | Count |
 |----------|-------|
@@ -68,7 +68,7 @@ This email impersonates Apple iCloud, threatening deletion of photos and videos 
 | 10 | MEDIUM | Integrity | Infrastructure | DomainKey-Signature (deprecated 2011) alongside DKIM -- specialized bulk sending platform |
 | 11 | INFO | Integrity | Infrastructure | X-Google-Sender-Delegation header -- unusual in inbound email |
 | 12 | INFO | Integrity | Infrastructure | DKIM passes for fexorlink.biz subdomain, not for Apple |
-| 13 | INFO | Confidentiality | Privacy | Email delivered to heidi.b.bernstein@gmail.com -- new account, no prior exposure history |
+| 13 | INFO | Confidentiality | Privacy | Email delivered to victim@example.com -- new account, no prior exposure history |
 
 
 ## Findings
@@ -147,10 +147,10 @@ After the visible body content, the email contains a large hidden block wrapped 
 | Severity | HIGH |
 | Domain | Integrity |
 | Category | Social Engineering |
-| Indicator | From: heidi.b.bernstein <ujqmwmk@vwjlqjys.mlpoydgzeg.fexorlink.biz> |
+| Indicator | From: victim <ujqmwmk@vwjlqjys.mlpoydgzeg.fexorlink.biz> |
 | MITRE | T1036 - Defense Evasion: Masquerading |
 
-The display name in the From field is `heidi.b.bernstein` -- the recipient's own email username. In most email clients, only the display name is shown by default; many users never see the actual sending address. A recipient glancing at the From field sees what looks like an email from themselves, which creates immediate confusion: "Did Apple somehow associate this notice with my own account? Is this something I triggered?" This disorientation lowers the recipient's defensive posture exactly when it needs to be highest. The actual sending address (`ujqmwmk@vwjlqjys.mlpoydgzeg.fexorlink.biz`) is a random-character address at a multi-level random subdomain of fexorlink.biz -- nothing to do with the account owner.
+The display name in the From field is `victim` -- the recipient's own email username. In most email clients, only the display name is shown by default; many users never see the actual sending address. A recipient glancing at the From field sees what looks like an email from themselves, which creates immediate confusion: "Did Apple somehow associate this notice with my own account? Is this something I triggered?" This disorientation lowers the recipient's defensive posture exactly when it needs to be highest. The actual sending address (`ujqmwmk@vwjlqjys.mlpoydgzeg.fexorlink.biz`) is a random-character address at a multi-level random subdomain of fexorlink.biz -- nothing to do with the account owner.
 
 
 ### 6. Sending IP on Spamhaus PBL with open SMTP port and port 1234
@@ -199,9 +199,9 @@ Two components of the email delivery chain carry VirusTotal malicious flags. `ef
 | Severity | MEDIUM |
 | Domain | Integrity |
 | Category | Infrastructure |
-| Indicator | To: me@aol.com / Delivered-To: heidi.b.bernstein@gmail.com |
+| Indicator | To: me@aol.com / Delivered-To: victim@example.com |
 
-The `To:` header names `me@aol.com` while the email was actually delivered to `heidi.b.bernstein@gmail.com`. This mismatch suggests the sender is using a different address in the SMTP envelope than in the message headers -- a common technique in bulk mail to obscure the true recipient list. The `heidi.b.bernstein@gmail.com` address received the email via SMTP envelope routing, not because it matched the `To:` header. This makes it harder for recipients to understand why they received the email and harder for abuse reporters to identify other recipients of the same campaign.
+The `To:` header names `me@aol.com` while the email was actually delivered to `victim@example.com`. This mismatch suggests the sender is using a different address in the SMTP envelope than in the message headers -- a common technique in bulk mail to obscure the true recipient list. The `victim@example.com` address received the email via SMTP envelope routing, not because it matched the `To:` header. This makes it harder for recipients to understand why they received the email and harder for abuse reporters to identify other recipients of the same campaign.
 
 
 ### 10. DomainKey-Signature (deprecated standard) included alongside modern DKIM
@@ -223,9 +223,9 @@ DomainKeys was the predecessor to DKIM, deprecated in 2011. Including a DomainKe
 | Severity | INFO |
 | Domain | Integrity |
 | Category | Infrastructure |
-| Indicator | X-Google-Sender-Delegation: heidi.b.bernstein@gmail.com Trusted Sender |
+| Indicator | X-Google-Sender-Delegation: victim@example.com Trusted Sender |
 
-This Google header typically appears when an email is processed through Gmail's delegation or forwarding infrastructure. Its presence on an inbound email delivered from an external source (fexorlink.biz) is unusual. Possible explanations: the email passed through a Gmail forwarding rule, or Gmail's handling of the envelope-to address stamped this header during delivery. This does not indicate the heidi.b.bernstein account was compromised as a relay, but it warrants awareness.
+This Google header typically appears when an email is processed through Gmail's delegation or forwarding infrastructure. Its presence on an inbound email delivered from an external source (fexorlink.biz) is unusual. Possible explanations: the email passed through a Gmail forwarding rule, or Gmail's handling of the envelope-to address stamped this header during delivery. This does not indicate the victim account was compromised as a relay, but it warrants awareness.
 
 
 ### 12. DKIM passes for fexorlink.biz subdomain, not for Apple
@@ -240,16 +240,16 @@ This Google header typically appears when an email is processed through Gmail's 
 DKIM passes -- but for the attacker's own domain (fexorlink.biz), not for Apple. DKIM passing only means the email was not tampered with in transit and was sent by the domain it claims to be from. It does not validate that the sender is who the display name claims. The email is correctly signed by fexorlink.biz; it just has nothing to do with Apple.
 
 
-### 13. New email account -- heidi.b.bernstein@gmail.com
+### 13. New email account -- victim@example.com
 
 | Field | Value |
 |-------|-------|
 | Severity | INFO |
 | Domain | Confidentiality |
 | Category | Privacy |
-| Indicator | Delivered-To: heidi.b.bernstein@gmail.com |
+| Indicator | Delivered-To: victim@example.com |
 
-This is the first email analyzed for the `heidi.b.bernstein@gmail.com` account. No prior exposure history for this address in the Canary report archive. The address received an iCloud phishing attempt -- suggesting it appears in consumer-targeting lists that have been paired with assumed Apple device usage patterns. See Tradecraft Assessment.
+This is the first email analyzed for the `victim@example.com` account. No prior exposure history for this address in the Canary report archive. The address received an iCloud phishing attempt -- suggesting it appears in consumer-targeting lists that have been paired with assumed Apple device usage patterns. See Tradecraft Assessment.
 
 
 ## MITRE ATT&CK
@@ -328,7 +328,7 @@ A block of scraped, benign-seeming text (citrus gardening guide, French universi
          +--> [efianalytics.com relay -- 216.244.76.116, Wowrack.com]
                 VT: 1 malicious engine
                 |
-                +--> [Gmail -- heidi.b.bernstein@gmail.com (delivered)]
+                +--> [Gmail -- victim@example.com (delivered)]
 
 Domains linked to this email:
   fexorlink.biz                     no creation date, no A record, Cloudflare NS only
@@ -356,23 +356,23 @@ This campaign is technically sophisticated for a phishing email:
 
 - **The character fragmentation obfuscation is automated.** Splitting every character into a `<span>` tag across a multi-paragraph email requires a templating system -- a human did not type this by hand. The garbage text injection is also automated content sourcing. This attacker is running tooling, not manually crafting phishing emails.
 
-- **The display name trick (victim's own username as sender name) is targeted.** To set `heidi.b.bernstein` as the display name, the attacker knew the recipient's email username before sending. This could come from any purchased email list that records both the username component and the full address.
+- **The display name trick (victim's own username as sender name) is targeted.** To set `victim` as the display name, the attacker knew the recipient's email username before sending. This could come from any purchased email list that records both the username component and the full address.
 
 - **The subject line uses emoji characters** (`??` which appear to be emoji rendered as `?` in the filename). These emoji are used to attract attention in an inbox preview and to defeat text-based subject line filters that don't normalize Unicode.
 
 - **Infrastructure rotation is built in.** The random-character subdomain cascade (`vwjlqjys.mlpoydgzeg.fexorlink.biz`) means each campaign can use a different subdomain, making IP/domain blocklisting ineffective without blocking the root domain. The disposable GCS bucket name (`ous2gsjdhx`) serves the same purpose.
 
-- **This is a consumer-targeted Apple scam, not a job-seeker campaign.** The heidi.b.bernstein@gmail.com account is receiving iCloud phishing -- which implies this address appears in lists compiled for Apple device users. This is a completely different exposure channel than the job-board Gmail (matthew.r.linville) or the consumer spam Hotmail (matthewlinville).
+- **This is a consumer-targeted Apple scam, not a job-seeker campaign.** The victim@example.com account is receiving iCloud phishing -- which implies this address appears in lists compiled for Apple device users. This is a completely different exposure channel than the job-board Gmail ([analyst]) or the consumer spam Hotmail ([analyst]).
 
 
 ## Comparison to Previous Emails
 
-First analysis for heidi.b.bernstein@gmail.com. No prior reports for this account.
+First analysis for victim@example.com. No prior reports for this account.
 
 | Dimension | This email (iCloud phish) | Harry & David (Hotmail, Mar 2026) |
 |-----------|--------------------------|----------------------------------|
 | Verdict | [X] Phishing | [X] Scam |
-| Account targeted | heidi.b.bernstein@gmail.com | matthewlinville@hotmail.com |
+| Account targeted | victim@example.com | [analyst]@example.com |
 | Claimed brand | Apple iCloud | Harry & David |
 | Sending domain | fexorlink.biz (throwaway) | hyniq.xyz (141d) |
 | Obfuscation | Span fragmentation + garbage injection | None |
@@ -413,7 +413,7 @@ If you already clicked and entered information:
 - Payment card details: contact your bank to report potential fraud and request a card replacement
 
 Broader context:
-- The heidi.b.bernstein@gmail.com address appears in consumer-targeting lists associated with Apple device users. Expect future Apple/iCloud-themed phishing to this address.
+- The victim@example.com address appears in consumer-targeting lists associated with Apple device users. Expect future Apple/iCloud-themed phishing to this address.
 - Consider enabling Gmail's Enhanced Safe Browsing, which provides faster phishing detection for your account.
 
 
@@ -421,7 +421,7 @@ Broader context:
 
 | Item | Status |
 |------|--------|
-| Source .eml file | Read-only analysis -- file untouched at C:\Users\matth\Downloads\blocked-account-icloud-phish.eml |
+| Source .eml file | Read-only analysis -- file untouched at C:\Users\[user]\Downloads\blocked-account-icloud-phish.eml |
 | Links visited by host | None |
 | Temporary scripts | C:\temp\icloud-phish-checks.ps1 -- safe to delete |
 
