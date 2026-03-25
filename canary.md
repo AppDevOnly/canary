@@ -3879,7 +3879,7 @@ $verdictText = if ($md -match 'Verdict: (\[.+?\][^\r\n]+)') { $Matches[1].Trim()
 # Severity uses bright alert colors (CRITICAL=#cf222e, HIGH=#e36209, MEDIUM=#9a6700, INFO=#0969da)
 # Verdict uses deep judgment colors in the same hue families but richer and darker
 $verdictColor = if     ($verdictText -match '^\[X\]')  { '#8b0000' }   # deep crimson (vs CRITICAL bright red)
-                elseif ($verdictText -match '^\[!\]')  { '#7c5200' }   # deep amber-brown (vs MEDIUM bright amber)
+                elseif ($verdictText -match '^\[!\]')  { '#0d6b6b' }   # deep teal (distinct from MEDIUM amber #9a6700)
                 elseif ($verdictText -match '^\[OK\]') { '#1a5c35' }   # forest green (not in severity palette)
                 elseif ($verdictText -match '^\[\?\]') { '#1e3a5f' }   # deep navy (vs INFO bright blue)
                 else                                   { '#374151' }   # charcoal
@@ -3984,28 +3984,29 @@ $body = [regex]::Replace($body, '(<td>)(INFO)(<\/td>)',     '$1<span style="back
 # Report verdict badges in Reading This Report table (deep judgment palette)
 $vb = 'color:#fff;padding:2px 8px;border-radius:3px;font-size:0.85em;font-weight:600;white-space:nowrap'
 $body = [regex]::Replace($body, '(<td>)(\[OK\] Safe)(<\/td>)',                        '$1<span style="background:#1a5c35;' + $vb + '">[OK] Safe</span>$3')
-$body = [regex]::Replace($body, '(<td>)(\[!\] Caution)(<\/td>)',                      '$1<span style="background:#7c5200;' + $vb + '">[!] Caution</span>$3')
+$body = [regex]::Replace($body, '(<td>)(\[!\] Caution)(<\/td>)',                      '$1<span style="background:#0d6b6b;' + $vb + '">[!] Caution</span>$3')
 $body = [regex]::Replace($body, '(<td>)(\[X\] Unsafe - Hidden Threat)(<\/td>)',       '$1<span style="background:#8b0000;' + $vb + '">[X] Unsafe - Hidden Threat</span>$3')
 $body = [regex]::Replace($body, '(<td>)(\[X\] Unsafe - Dangerous by Design)(<\/td>)', '$1<span style="background:#8b0000;' + $vb + '">[X] Unsafe - Dangerous by Design</span>$3')
 $body = [regex]::Replace($body, '(<td>)(\[\?\] Researcher Mode)(<\/td>)',              '$1<span style="background:#1e3a5f;' + $vb + '">[?] Researcher Mode</span>$3')
 
-# Report title block -- entire h1 becomes the verdict-colored banner
-# Structured as: CANARY SECURITY REPORT label / Target: name / Verdict: bold text
+# Report title block -- matches both "Canary Security Report" and "Canary Threat Report"
+# Structured as: report type label (uppercase) / Target: name / Verdict: bold text
 $body = [regex]::Replace($body,
-    '<h1>(Canary Security Report): (.+?) -- (.+?)</h1>',
+    '<h1>(Canary [^:]+): (.+?) -- (.+?)</h1>',
     '<h1 style="background:' + $verdictColor + ';color:#fff;padding:1.25rem 1.5rem;border-radius:6px;margin-bottom:1.5rem;line-height:1.6;border:none">' +
-    '<span style="font-size:1.5rem;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;display:block;margin-bottom:4px">Canary Security Report</span>' +
+    '<span style="font-size:1.5rem;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;display:block;margin-bottom:4px">$1</span>' +
     '<span style="font-size:0.9rem;font-weight:400;opacity:0.88;display:block">Target: &quot;$2&quot;</span>' +
     '<span style="font-size:0.9rem;font-weight:700;display:block">Verdict: $3</span>' +
     '</h1>')
 
-$html = @"
+$reportTitle = [System.IO.Path]::GetFileNameWithoutExtension($htmlPath)
+$htmlTop = @"
 <!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Canary Report: $targetSlug</title>
+<title>$reportTitle</title>
 <style>
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; color: #24292f; line-height: 1.6; }
   h1 { padding-bottom: 0.5rem; }
@@ -4021,16 +4022,16 @@ $html = @"
   hr { border: none; border-top: 1px solid #d0d7de; margin: 2rem 0; }
   ul, ol { padding-left: 1.5rem; }
   li { margin: 0.2rem 0; }
+  @media print { h1 { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
 </style>
 </head>
 <body>
-$body
-</body>
-</html>
 "@
+$htmlBottom = "</body>`n</html>"
+$html = $htmlTop + $body + $htmlBottom
 
 $html | Out-File $htmlPath -Encoding UTF8 -Force
-Write-Host "HTML report: $htmlPath"
+Write-Host "HTML: $htmlPath"
 '@ -replace 'TARGET_SLUG', $targetSlug `
    -replace 'DATE', (Get-Date -Format 'yyyyMMdd') |
    Out-File $htmlScript -Encoding UTF8 -Force
