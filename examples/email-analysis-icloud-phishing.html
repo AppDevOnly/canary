@@ -22,7 +22,252 @@
   @media print { h1 { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
 </style>
 </head>
-<body>
-$body
-</body>
+<body><h1 style="background:#8b0000;color:#fff;padding:1.25rem 1.5rem;border-radius:6px;margin-bottom:1.5rem;line-height:1.6;border:none"><span style="font-size:1.5rem;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;display:block;margin-bottom:4px">Canary Threat Report</span><span style="font-size:0.9rem;font-weight:400;opacity:0.88;display:block">Target: &quot;We've blocked your account! Your photos and videos will be deleted&quot;</span><span style="font-size:0.9rem;font-weight:700;display:block">Verdict: [X] Phishing</span></h1><p>Date: 2026-03-24
+Target: victim@example.com, blocked-account-icloud-phish.eml
+Sent: Mon, 23 Mar 2026 12:12:14 +0000
+From: victim &lt;ujqmwmk@vwjlqjys.mlpoydgzeg.fexorlink.biz&gt;
+Evaluation: Email threat analysis
+Tool: Canary v2.8</p><p>
+<h2>Reading This Report</h2><table><tr><th>Report Verdict</th><th>Meaning</th><th>What to do</th></tr>
+<tr><td><span style="background:#1a5c35;color:#fff;padding:2px 8px;border-radius:3px;font-size:0.85em;font-weight:600;white-space:nowrap">[OK] Likely Legitimate</span></td><td>No significant threat indicators found.</td><td>No action required.</td></tr>
+<tr><td><span style="background:#0d6b6b;color:#fff;padding:2px 8px;border-radius:3px;font-size:0.85em;font-weight:600;white-space:nowrap">[!] Caution</span></td><td>Issues found, no proof of intentional harm.</td><td>Read findings before acting.</td></tr>
+<tr><td><span style="background:#8b0000;color:#fff;padding:2px 8px;border-radius:3px;font-size:0.85em;font-weight:600;white-space:nowrap">[X] Phishing</span></td><td>Deliberate attempt to steal credentials or deliver malware via links or attachments.</td><td>Do not click anything. Report and delete.</td></tr>
+<tr><td><span style="background:#8b0000;color:#fff;padding:2px 8px;border-radius:3px;font-size:0.85em;font-weight:600;white-space:nowrap">[X] Scam</span></td><td>Deliberate attempt to defraud you directly (money mule, advance fee, fake job, crypto investment).</td><td>Do not reply. Do not provide any information.</td></tr>
+<tr><td><span style="background:#8b0000;color:#fff;padding:2px 8px;border-radius:3px;font-size:0.85em;font-weight:600;white-space:nowrap">[X] Malware Delivery</span></td><td>Email contains or links to malware.</td><td>Do not open attachments or click links.</td></tr>
+<tr><td><span style="background:#1e3a5f;color:#fff;padding:2px 8px;border-radius:3px;font-size:0.85em;font-weight:600;white-space:nowrap">[?] Inconclusive</span></td><td>Mixed or insufficient signals.</td><td>Read findings. Treat with caution.</td></tr>
+</table><table><tr><th>Findings Severity</th><th>Meaning</th></tr>
+<tr><td><span style="background:#cf222e;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.85em">CRITICAL</span></td><td>Confirmed threat. Do not proceed.</td></tr>
+<tr><td><span style="background:#e36209;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.85em">HIGH</span></td><td>Strong indicator. Changes the overall verdict.</td></tr>
+<tr><td><span style="background:#9a6700;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.85em">MEDIUM</span></td><td>Supporting evidence. Consistent with the verdict.</td></tr>
+<tr><td><span style="background:#57606a;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.85em">LOW</span></td><td>Minor signal. Low weight on its own.</td></tr>
+<tr><td><span style="background:#0969da;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.85em">INFO</span></td><td>Informational. Context only.</td></tr>
+</table><table><tr><th>Security Domain</th><th>Question being answered</th></tr>
+<tr><td>Confidentiality</td><td>Does this email attempt to steal your data or expose information about you?</td></tr>
+<tr><td>Integrity</td><td>Is this email what it claims to be?</td></tr>
+<tr><td>Availability</td><td>Could acting on this email harm your systems or accounts?</td></tr>
+</table><p>
+<h2>Verdict: [X] Phishing -- Apple iCloud credential and payment harvest</h2><p>This is a fake Apple iCloud payment notice designed to steal your Apple ID and payment card details. The "Update my payment details" button leads to an attacker-controlled phishing page hosted in a Google Cloud Storage bucket -- a technique specifically chosen because Google's domain bypasses most URL reputation filters. Do not click anything.</p><p>
+<h2>Executive Summary</h2><p>This email impersonates Apple iCloud, threatening deletion of photos and videos unless the recipient updates their payment method immediately. The "Update my payment details" link resolves to a phishing page hosted in a Google Cloud Storage bucket (<code>storage.googleapis.com/ous2gsjdhx/</code>) -- an attacker-controlled bucket using Google's domain to appear trustworthy. The email was not sent by Apple; it originated from <code>fexorlink.biz</code> infrastructure using a Brazilian-hosted server that is listed on Spamhaus's Policy Block List. The body text uses character-level HTML obfuscation (each letter in a separate <code>&lt;span&gt;</code> tag) to defeat keyword-scanning spam filters, and embeds hundreds of lines of irrelevant scraped text in a hidden element to confuse machine-learning classifiers. The sender's display name is set to the recipient's own username (<code>victim</code>) -- a social engineering trick to create confusion about the source of the email. Three infrastructure components are flagged as malicious across VirusTotal and Spamhaus.</p><table><tr><th>Severity</th><th>Count</th></tr>
+<tr><td>Critical</td><td>2</td></tr>
+<tr><td>High</td><td>5</td></tr>
+<tr><td>Medium</td><td>3</td></tr>
+<tr><td>Low</td><td>0</td></tr>
+<tr><td>Info</td><td>3</td></tr>
+</table><p>
+<h2>Findings Summary</h2><table><tr><th>#</th><th>Severity</th><th>Domain</th><th>Category</th><th>What was found</th></tr>
+<tr><td>1</td><td><span style="background:#cf222e;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.85em">CRITICAL</span></td><td>Availability</td><td>Fraud</td><td>Phishing page hosted on Google Cloud Storage to bypass URL filters</td></tr>
+<tr><td>2</td><td><span style="background:#cf222e;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.85em">CRITICAL</span></td><td>Integrity</td><td>Social Engineering</td><td>Fake iCloud payment notice with false deletion deadline</td></tr>
+<tr><td>3</td><td><span style="background:#e36209;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.85em">HIGH</span></td><td>Integrity</td><td>Obfuscation</td><td>Character-level span fragmentation defeats keyword scanning</td></tr>
+<tr><td>4</td><td><span style="background:#e36209;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.85em">HIGH</span></td><td>Integrity</td><td>Obfuscation</td><td>Garbage text injection (<code>&lt;ObjecT&gt;</code>) confuses ML spam classifiers</td></tr>
+<tr><td>5</td><td><span style="background:#e36209;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.85em">HIGH</span></td><td>Integrity</td><td>Social Engineering</td><td>Display name set to victim's own username</td></tr>
+<tr><td>6</td><td><span style="background:#e36209;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.85em">HIGH</span></td><td>Integrity</td><td>Infrastructure</td><td>Sending IP 154.29.78.158 on Spamhaus PBL; self-signed cert; port 1234 open</td></tr>
+<tr><td>7</td><td><span style="background:#e36209;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.85em">HIGH</span></td><td>Integrity</td><td>Infrastructure</td><td>efianalytics.com relay and 216.244.76.116 both flagged malicious on VT</td></tr>
+<tr><td>8</td><td><span style="background:#9a6700;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.85em">MEDIUM</span></td><td>Integrity</td><td>Infrastructure</td><td>fexorlink.biz -- infrastructure-only domain; no web presence; random-character subdomain cascade</td></tr>
+<tr><td>9</td><td><span style="background:#9a6700;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.85em">MEDIUM</span></td><td>Integrity</td><td>Infrastructure</td><td>To: me@aol.com while delivered to Gmail -- misdirection / list mismatch</td></tr>
+<tr><td>10</td><td><span style="background:#9a6700;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.85em">MEDIUM</span></td><td>Integrity</td><td>Infrastructure</td><td>DomainKey-Signature (deprecated 2011) alongside DKIM -- specialized bulk sending platform</td></tr>
+<tr><td>11</td><td><span style="background:#0969da;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.85em">INFO</span></td><td>Integrity</td><td>Infrastructure</td><td>X-Google-Sender-Delegation header -- unusual in inbound email</td></tr>
+<tr><td>12</td><td><span style="background:#0969da;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.85em">INFO</span></td><td>Integrity</td><td>Infrastructure</td><td>DKIM passes for fexorlink.biz subdomain, not for Apple</td></tr>
+<tr><td>13</td><td><span style="background:#0969da;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.85em">INFO</span></td><td>Confidentiality</td><td>Privacy</td><td>Email delivered to victim@example.com -- new account, no prior exposure history</td></tr>
+</table><p>
+<h2>Findings</h2><p>
+<h3>1. Phishing link hosted in Google Cloud Storage bucket to bypass URL trust filters</h3><table><tr><th>Field</th><th>Value</th></tr>
+<tr><td>Severity</td><td><span style="background:#cf222e;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.85em">CRITICAL</span></td></tr>
+<tr><td>Domain</td><td>Availability</td></tr>
+<tr><td>Category</td><td>Fraud</td></tr>
+<tr><td>Indicator</td><td>https://storage.googleapis.com/ous2gsjdhx/adasfdsdfdsfsaapo.html</td></tr>
+<tr><td>MITRE</td><td>T1583.006 - Resource Development: Acquire Infrastructure: Web Services</td></tr>
+</table><p>The "Update my payment details" button -- and all three links in the email -- point to an HTML file hosted in a Google Cloud Storage bucket named <code>ous2gsjdhx</code>. The page (<code>adasfdsdfdsfsaapo.html</code> -- random characters = disposable filename) is controlled by the attacker, not by Apple. The URL uses <code>storage.googleapis.com</code>, which is Google's legitimate CDN domain. This is a deliberate technique: most URL reputation systems whitelist Google's own domains, so this link passes many spam and phishing filters that would catch a link to an unknown attacker-controlled domain. The landing page is almost certainly a fake Apple ID login form or payment details page that sends whatever you enter directly to the attacker.</p><p>Do not visit this URL under any circumstances. If you have already clicked and entered any information (Apple ID, password, payment card number), treat that information as compromised immediately.</p><p><strong>Fix:</strong>
+<ul><li>Do not click. Delete the email.</li>
+<li>If you clicked and entered Apple ID credentials: change your Apple ID password immediately at appleid.apple.com and enable two-factor authentication if not already enabled.</li>
+<li>If you entered payment details: contact your bank or card issuer to report potential fraud and request a card replacement.</li>
+<li>Report the GCS bucket to Google: https://safebrowsing.google.com/safebrowsing/report_phish/</li>
+</ul><p><strong>Countermeasure:</strong> Enable phishing-resistant authentication (passkeys or hardware security keys) on your Apple ID so that a stolen password alone is not sufficient to access your account. (D3-CH Credential Hardening)</p><p>
+<h3>2. Content impersonates Apple iCloud with false deletion deadline</h3><table><tr><th>Field</th><th>Value</th></tr>
+<tr><td>Severity</td><td><span style="background:#cf222e;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.85em">CRITICAL</span></td></tr>
+<tr><td>Domain</td><td>Integrity</td></tr>
+<tr><td>Category</td><td>Fraud</td></tr>
+<tr><td>Indicator</td><td>Fake Subscription ID: 59838016, Expiration Date: 03-23-2026 (day of sending)</td></tr>
+<tr><td>MITRE</td><td>T1656 - Defense Evasion: Impersonation</td></tr>
+</table><p>The email body is designed to look like an official Apple iCloud notice, using Apple's visual style (blue/red alert boxes, iCloud branding) and threatening imminent deletion of photos and videos. The expiration date is set to the same day the email was sent (March 23, 2026) to create maximum urgency. The subscription ID (59838016) and product details are fabricated. Apple does not send payment notifications from <code>fexorlink.biz</code> -- Apple's legitimate email domains are <code>@apple.com</code> and <code>@email.apple.com</code>. The email was not sent by Apple in any capacity.</p><p><strong>Fix:</strong> If you receive any iCloud-related notices, navigate directly to appleid.apple.com in your browser (do not click email links) to check your actual account status.</p><p>
+<h3>3. Character-level HTML span fragmentation -- keyword filter evasion</h3><table><tr><th>Field</th><th>Value</th></tr>
+<tr><td>Severity</td><td><span style="background:#e36209;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.85em">HIGH</span></td></tr>
+<tr><td>Domain</td><td>Integrity</td></tr>
+<tr><td>Category</td><td>Obfuscation</td></tr>
+<tr><td>Indicator</td><td><code>&lt;span&gt;i&lt;/span&gt;&lt;span&gt;C&lt;/span&gt;&lt;span&gt;l&lt;/span&gt;&lt;span&gt;o&lt;/span&gt;&lt;span&gt;u&lt;/span&gt;&lt;span&gt;d&lt;/span&gt;</code> (every character wrapped individually)</td></tr>
+<tr><td>MITRE</td><td>T1027 - Defense Evasion: Obfuscated Files or Information</td></tr>
+</table><p>Every word in the visible email body is split into individual single-character <code>&lt;span&gt;</code> tags. Rendered in an email client, this looks completely normal -- the browser reassembles the characters into readable words. But spam filters that scan raw HTML for keywords ("iCloud", "payment", "expired", "delete") see no complete words at all, only isolated characters. This is a different technique from BiDi obfuscation: no text is reversed and no RTL direction is involved. The sole purpose is to defeat text-pattern matching at the raw HTML level. This technique requires deliberate, automated HTML generation -- it is not a side effect of any standard email composer.</p><p>Decoded visible content: "Your payment method has expired: Update your payment information... Your photos and videos will be Deleted !! ... We failed to renew your iCloud storage !! ... Update my payment details"</p><p>
+<h3>4. Garbage text injection in hidden <code>&lt;ObjecT&gt;</code> element</h3><table><tr><th>Field</th><th>Value</th></tr>
+<tr><td>Severity</td><td><span style="background:#e36209;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.85em">HIGH</span></td></tr>
+<tr><td>Domain</td><td>Integrity</td></tr>
+<tr><td>Category</td><td>Obfuscation</td></tr>
+<tr><td>Indicator</td><td><code>&lt;ObjecT&gt;</code> containing citrus gardening guide, French university emails, forum templates, random strings</td></tr>
+<tr><td>MITRE</td><td>T1027 - Defense Evasion: Obfuscated Files or Information</td></tr>
+</table><p>After the visible body content, the email contains a large hidden block wrapped in <code>&lt;ObjecT&gt;</code> (note the mixed case -- <code>&lt;object&gt;</code> in lowercase would be filtered; mixed case evades tag-based filters). The content is scraped from unrelated sources: a gardening article about growing citrus trees indoors, French-language university student election communications, placeholder templates ("CUSTOMER NAME", "City: City"), forum archival notices, and long random alphanumeric strings. This content is invisible to the reader but present in the raw HTML. Machine-learning spam classifiers score emails partly on word content -- injecting large amounts of innocent text about lemons, gardening, and student elections lowers the overall "spam" probability score of the email. The mixed-case <code>&lt;ObjecT&gt;</code> tag is used specifically because <code>&lt;object&gt;</code> is commonly blocked by both spam filters and mail clients as a potentially dangerous tag.</p><p>
+<h3>5. Sender display name set to victim's own username</h3><table><tr><th>Field</th><th>Value</th></tr>
+<tr><td>Severity</td><td><span style="background:#e36209;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.85em">HIGH</span></td></tr>
+<tr><td>Domain</td><td>Integrity</td></tr>
+<tr><td>Category</td><td>Social Engineering</td></tr>
+<tr><td>Indicator</td><td>From: victim &lt;ujqmwmk@vwjlqjys.mlpoydgzeg.fexorlink.biz&gt;</td></tr>
+<tr><td>MITRE</td><td>T1036 - Defense Evasion: Masquerading</td></tr>
+</table><p>The display name in the From field is <code>victim</code> -- the recipient's own email username. In most email clients, only the display name is shown by default; many users never see the actual sending address. A recipient glancing at the From field sees what looks like an email from themselves, which creates immediate confusion: "Did Apple somehow associate this notice with my own account? Is this something I triggered?" This disorientation lowers the recipient's defensive posture exactly when it needs to be highest. The actual sending address (<code>ujqmwmk@vwjlqjys.mlpoydgzeg.fexorlink.biz</code>) is a random-character address at a multi-level random subdomain of fexorlink.biz -- nothing to do with the account owner.</p><p>
+<h3>6. Sending IP on Spamhaus PBL with open SMTP port and port 1234</h3><table><tr><th>Field</th><th>Value</th></tr>
+<tr><td>Severity</td><td><span style="background:#e36209;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.85em">HIGH</span></td></tr>
+<tr><td>Domain</td><td>Integrity</td></tr>
+<tr><td>Category</td><td>Infrastructure</td></tr>
+<tr><td>Indicator</td><td>154.29.78.158 -- ASN 211014 "Elite Techno Solution"; PTR: bottlegame.uol.com.br; Spamhaus PBL 127.0.0.4; Shodan: ports 25, 80, 1234, 8181; self-signed cert</td></tr>
+<tr><td>MITRE</td><td>T1584.004 - Resource Development: Compromise Infrastructure: Server</td></tr>
+</table><p>The originating send server (154.29.78.158) is listed on Spamhaus's Policy Block List -- indicating its IP class is flagged as unauthorized for direct email delivery. Shodan shows this IP running an open SMTP server (port 25), a web server (port 80), and two non-standard ports: 1234 and 8181. Port 1234 is not associated with any standard service and is commonly used for C2 communications or custom attack tooling. The PTR record claims to be <code>bottlegame.uol.com.br</code> (a Brazilian internet company domain) but the actual ASN is "Elite Techno Solution" -- the PTR is misleading. A self-signed certificate is present, meaning no legitimate CA has verified this server's identity. This is a purpose-built spam/phishing server, not an accidentally misconfigured one.</p><p>
+<h3>7. efianalytics.com relay and 216.244.76.116 both flagged malicious on VirusTotal</h3><table><tr><th>Field</th><th>Value</th></tr>
+<tr><td>Severity</td><td><span style="background:#e36209;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.85em">HIGH</span></td></tr>
+<tr><td>Domain</td><td>Integrity</td></tr>
+<tr><td>Category</td><td>Infrastructure</td></tr>
+<tr><td>Indicator</td><td>efianalytics.com: VT malicious=1; 216.244.76.116: VT malicious=1</td></tr>
+<tr><td>MITRE</td><td>T1584.004 - Resource Development: Compromise Infrastructure: Server</td></tr>
+</table><p>Two components of the email delivery chain carry VirusTotal malicious flags. <code>efianalytics.com</code> appears in the Received headers as an intermediate hop (IP 216.244.76.116, ASN 27323 Wowrack.com hosting) and has at least one AV engine detection in VT despite being 18 years old -- an established domain that has been flagged for abuse. <code>216.244.76.116</code> also carries a malicious detection. Both appearing in the same email's routing chain is consistent with a coordinated infrastructure cluster used for phishing delivery.</p><p>
+<h3>8. fexorlink.biz -- infrastructure-only domain with random-character subdomain cascade</h3><table><tr><th>Field</th><th>Value</th></tr>
+<tr><td>Severity</td><td><span style="background:#9a6700;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.85em">MEDIUM</span></td></tr>
+<tr><td>Domain</td><td>Integrity</td></tr>
+<tr><td>Category</td><td>Infrastructure</td></tr>
+<tr><td>Indicator</td><td>fexorlink.biz: no A record, no MX, no creation date; Cloudflare NS; mlpoydgzeg.fexorlink.biz SPF: ip4:154.29.78.158 -all</td></tr>
+<tr><td>MITRE</td><td>T1583.001 - Resource Development: Acquire Infrastructure: Domains</td></tr>
+</table><p><code>fexorlink.biz</code> has no A record, no MX record, and no discoverable web presence -- it exists purely as a domain for generating sending subdomains. The three-level subdomain pattern (<code>vwjlqjys.mlpoydgzeg.fexorlink.biz</code>) uses random characters at each level: <code>mlpoydgzeg</code> is the sending subdomain, <code>vwjlqjys</code> is the DKIM signing subdomain. Random characters at each level mean: (a) the subdomains are disposable and can be rotated per campaign, (b) no brand reputation is built up at the subdomain level that could be blocked, and (c) the structure suggests automated bulk campaign infrastructure. The <code>.biz</code> TLD is disproportionately represented in phishing and spam campaigns relative to its legitimate use base.</p><p>
+<h3>9. To: me@aol.com while delivered to Gmail -- list misdirection</h3><table><tr><th>Field</th><th>Value</th></tr>
+<tr><td>Severity</td><td><span style="background:#9a6700;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.85em">MEDIUM</span></td></tr>
+<tr><td>Domain</td><td>Integrity</td></tr>
+<tr><td>Category</td><td>Infrastructure</td></tr>
+<tr><td>Indicator</td><td>To: me@aol.com / Delivered-To: victim@example.com</td></tr>
+</table><p>The <code>To:</code> header names <code>me@aol.com</code> while the email was actually delivered to <code>victim@example.com</code>. This mismatch suggests the sender is using a different address in the SMTP envelope than in the message headers -- a common technique in bulk mail to obscure the true recipient list. The <code>victim@example.com</code> address received the email via SMTP envelope routing, not because it matched the <code>To:</code> header. This makes it harder for recipients to understand why they received the email and harder for abuse reporters to identify other recipients of the same campaign.</p><p>
+<h3>10. DomainKey-Signature (deprecated standard) included alongside modern DKIM</h3><table><tr><th>Field</th><th>Value</th></tr>
+<tr><td>Severity</td><td><span style="background:#9a6700;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.85em">MEDIUM</span></td></tr>
+<tr><td>Domain</td><td>Integrity</td></tr>
+<tr><td>Category</td><td>Infrastructure</td></tr>
+<tr><td>Indicator</td><td>DomainKey-Signature header present (v=rsa-sha1; c=nofws)</td></tr>
+</table><p>DomainKeys was the predecessor to DKIM, deprecated in 2011. Including a DomainKey-Signature alongside a modern DKIM-Signature indicates the sending platform was either built before 2011 and never updated, or deliberately includes the legacy signature to appear legitimate to old mail systems that might still check for it. Most modern spam platforms do not include this header. Its presence is a fingerprint of a specific (likely older or specialized) bulk sending tool.</p><p>
+<h3>11. X-Google-Sender-Delegation header present on inbound email</h3><table><tr><th>Field</th><th>Value</th></tr>
+<tr><td>Severity</td><td><span style="background:#0969da;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.85em">INFO</span></td></tr>
+<tr><td>Domain</td><td>Integrity</td></tr>
+<tr><td>Category</td><td>Infrastructure</td></tr>
+<tr><td>Indicator</td><td>X-Google-Sender-Delegation: victim@example.com Trusted Sender</td></tr>
+</table><p>This Google header typically appears when an email is processed through Gmail's delegation or forwarding infrastructure. Its presence on an inbound email delivered from an external source (fexorlink.biz) is unusual. Possible explanations: the email passed through a Gmail forwarding rule, or Gmail's handling of the envelope-to address stamped this header during delivery. This does not indicate the victim account was compromised as a relay, but it warrants awareness.</p><p>
+<h3>12. DKIM passes for fexorlink.biz subdomain, not for Apple</h3><table><tr><th>Field</th><th>Value</th></tr>
+<tr><td>Severity</td><td><span style="background:#0969da;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.85em">INFO</span></td></tr>
+<tr><td>Domain</td><td>Integrity</td></tr>
+<tr><td>Category</td><td>Infrastructure</td></tr>
+<tr><td>Indicator</td><td>DKIM d=vwjlqjys.mlpoydgzeg.fexorlink.biz</td></tr>
+</table><p>DKIM passes -- but for the attacker's own domain (fexorlink.biz), not for Apple. DKIM passing only means the email was not tampered with in transit and was sent by the domain it claims to be from. It does not validate that the sender is who the display name claims. The email is correctly signed by fexorlink.biz; it just has nothing to do with Apple.</p><p>
+<h3>13. New email account -- victim@example.com</h3><table><tr><th>Field</th><th>Value</th></tr>
+<tr><td>Severity</td><td><span style="background:#0969da;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.85em">INFO</span></td></tr>
+<tr><td>Domain</td><td>Confidentiality</td></tr>
+<tr><td>Category</td><td>Privacy</td></tr>
+<tr><td>Indicator</td><td>Delivered-To: victim@example.com</td></tr>
+</table><p>This is the first email analyzed for the <code>victim@example.com</code> account. No prior exposure history for this address in the Canary report archive. The address received an iCloud phishing attempt -- suggesting it appears in consumer-targeting lists that have been paired with assumed Apple device usage patterns. See Tradecraft Assessment.</p><p>
+<h2>MITRE ATT&amp;CK</h2><p>Techniques mapped from findings in this evaluation.
+Full descriptions: https://attack.mitre.org</p><p>MITRE ATT&amp;CK(R) is a registered trademark of The MITRE Corporation and is used in accordance
+with the MITRE ATT&amp;CK Terms of Use. Technique mappings in this report reference the MITRE
+ATT&amp;CK knowledge base, which is published under the Creative Commons Attribution 4.0 license.
+https://attack.mitre.org/resources/terms-of-use/</p><p>  TA0042 Resource Development
+    T1583.001  Acquire Infrastructure: Domains
+               (fexorlink.biz registered for sending infrastructure only)
+    T1583.006  Acquire Infrastructure: Web Services
+               (Google Cloud Storage bucket ous2gsjdhx used to host phishing page)
+    T1584.004  Compromise Infrastructure: Server
+               (154.29.78.158 PBL-listed server; efianalytics.com malicious relay)</p><p>  TA0001 Initial Access
+    T1566.002  Phishing: Spearphishing Link
+               (GCS-hosted phishing page linked from email body)</p><p>  TA0005 Defense Evasion
+    T1027      Obfuscated Files or Information
+               (character-level span fragmentation + garbage text injection)
+    T1036      Masquerading
+               (display name impersonates victim's own username; content impersonates Apple)
+    T1656      Impersonation
+               (Apple iCloud brand impersonation)</p><p>  TA0006 Credential Access
+    T1598.003  Phishing for Information: Spearphishing Link
+               (Apple ID credential and payment details harvest via GCS landing page)</p><p>  TA0040 Impact
+    T1657      Financial Theft
+               (payment card details targeted via fake iCloud renewal page)</p><p>
+<h2>Obfuscation Technique Reference</h2><p>Two distinct obfuscation techniques were used in this email:</p><p><strong>Technique 1: Character-level span fragmentation</strong></p><p>Every rendered word in the body is split into individual HTML characters, each in its own <code>&lt;span&gt;</code> tag:</p><p><pre><code>Rendered:  iCloud Payment Notice
+Raw HTML:  &lt;span&gt;i&lt;/span&gt;&lt;span&gt;C&lt;/span&gt;&lt;span&gt;l&lt;/span&gt;&lt;span&gt;o&lt;/span&gt;
+           &lt;span&gt;u&lt;/span&gt;&lt;span&gt;d&lt;/span&gt;&lt;span&gt; &lt;/span&gt;&lt;span&gt;P&lt;/span&gt;
+           &lt;span&gt;a&lt;/span&gt;&lt;span&gt;y&lt;/span&gt;&lt;span&gt;m&lt;/span&gt;&lt;span&gt;e&lt;/span&gt;
+           &lt;span&gt;n&lt;/span&gt;&lt;span&gt;t&lt;/span&gt;&lt;span&gt; &lt;/span&gt;&lt;span&gt;N&lt;/span&gt;
+           &lt;span&gt;o&lt;/span&gt;&lt;span&gt;t&lt;/span&gt;&lt;span&gt;i&lt;/span&gt;&lt;span&gt;c&lt;/span&gt;
+           &lt;span&gt;e&lt;/span&gt;
+</code></pre></p><p>Spam filters scanning raw HTML for "iCloud", "payment", or "expired" find nothing. Email clients render the text normally. This is distinct from BiDi obfuscation (no RTL direction, no character reversal). Note: the canary email analysis spec currently checks for BiDi (RTL span) obfuscation but does not have a dedicated check for this character fragmentation pattern. Backlog item added.</p><p><strong>Technique 2: Garbage text injection via mixed-case <code>&lt;ObjecT&gt;</code> tag</strong></p><p>A block of scraped, benign-seeming text (citrus gardening guide, French university communications, forum boilerplate) is hidden inside <code>&lt;ObjecT&gt;</code> (mixed case avoids the <code>&lt;object&gt;</code> tag filter). Visible body text: approximately 200 words. Hidden garbage text: approximately 1,000 words. ML classifiers that score on word content see the email as approximately 80% citrus gardening, 20% iCloud billing -- significantly lowering the spam probability score.</p><p>
+<h2>Infrastructure Map</h2><p><pre><code>[Attacker -- unknown origin]
+  |
+  +--&gt; [154.29.78.158 -- "Elite Techno Solution" / PTR: bottlegame.uol.com.br]
+         Spamhaus PBL listed; ports 25, 80, 1234, 8181; self-signed cert
+         Subdomain: mlpoydgzeg.fexorlink.biz / SPF: ip4:154.29.78.158 -all
+         |
+         +--&gt; [efianalytics.com relay -- 216.244.76.116, Wowrack.com]
+                VT: 1 malicious engine
+                |
+                +--&gt; [Gmail -- victim@example.com (delivered)]
+
+Domains linked to this email:
+  fexorlink.biz                     no creation date, no A record, Cloudflare NS only
+  mlpoydgzeg.fexorlink.biz          sending subdomain, SPF: ip4:154.29.78.158 -all
+  vwjlqjys.mlpoydgzeg.fexorlink.biz DKIM signing subdomain
+  efianalytics.com                  relay hop, VT: 1 malicious, age 6734d (18yr)
+  storage.googleapis.com/ous2gsjdhx attacker-controlled GCS bucket; phishing landing page
+
+IPs observed:
+  154.29.78.158   ASN 211014 Elite Techno Solution, US   PBL listed; ports 25/80/1234/8181
+  216.244.76.116  ASN 27323 Wowrack.com, US              VT: 1 malicious
+  (GCS bucket resolves to Google CDN IPs -- not attacker-controlled at IP level)
+
+Shared infrastructure: fexorlink.biz + 154.29.78.158 form a cohesive sending cluster
+Click destination: storage.googleapis.com/ous2gsjdhx/adasfdsdfdsfsaapo.html (GCS phishing page -- not visited)
+Attachments: None
+</code></pre></p><p>
+<h2>Tradecraft Assessment</h2><p>This campaign is technically sophisticated for a phishing email:</p><ul><li><strong>GCS bucket for phishing hosting is deliberate and effective.</strong> Hosting the phishing page on Google's own infrastructure (<code>storage.googleapis.com</code>) means: the TLS cert is valid and issued by Google, the domain has global reputation whitelisting, and URL reputation systems are slow to flag it because the domain itself is Google's. This is a known-to-work technique that requires attacker infrastructure setup beyond just registering a domain.</li>
+</ul><ul><li><strong>The character fragmentation obfuscation is automated.</strong> Splitting every character into a <code>&lt;span&gt;</code> tag across a multi-paragraph email requires a templating system -- a human did not type this by hand. The garbage text injection is also automated content sourcing. This attacker is running tooling, not manually crafting phishing emails.</li>
+</ul><ul><li><strong>The display name trick (victim's own username as sender name) is targeted.</strong> To set <code>victim</code> as the display name, the attacker knew the recipient's email username before sending. This could come from any purchased email list that records both the username component and the full address.</li>
+</ul><ul><li><strong>The subject line uses emoji characters</strong> (<code>??</code> which appear to be emoji rendered as <code>?</code> in the filename). These emoji are used to attract attention in an inbox preview and to defeat text-based subject line filters that don't normalize Unicode.</li>
+</ul><ul><li><strong>Infrastructure rotation is built in.</strong> The random-character subdomain cascade (<code>vwjlqjys.mlpoydgzeg.fexorlink.biz</code>) means each campaign can use a different subdomain, making IP/domain blocklisting ineffective without blocking the root domain. The disposable GCS bucket name (<code>ous2gsjdhx</code>) serves the same purpose.</li>
+</ul><ul><li><strong>This is a consumer-targeted Apple scam, not a job-seeker campaign.</strong> The victim@example.com account is receiving iCloud phishing -- which implies this address appears in lists compiled for Apple device users. This is a completely different exposure channel than the job-board Gmail ([analyst]) or the consumer spam Hotmail ([analyst]).</li>
+</ul><p>
+<h2>Comparison to Previous Emails</h2><p>First analysis for victim@example.com. No prior reports for this account.</p><table><tr><th>Dimension</th><th>This email (iCloud phish)</th><th>Harry &amp; David (Hotmail, Mar 2026)</th></tr>
+<tr><td>Verdict</td><td><span style="background:#8b0000;color:#fff;padding:2px 8px;border-radius:3px;font-size:0.85em;font-weight:600;white-space:nowrap">[X] Phishing</span></td><td><span style="background:#8b0000;color:#fff;padding:2px 8px;border-radius:3px;font-size:0.85em;font-weight:600;white-space:nowrap">[X] Scam</span></td></tr>
+<tr><td>Account targeted</td><td>victim@example.com</td><td>[analyst]@example.com</td></tr>
+<tr><td>Claimed brand</td><td>Apple iCloud</td><td>Harry &amp; David</td></tr>
+<tr><td>Sending domain</td><td>fexorlink.biz (throwaway)</td><td>hyniq.xyz (141d)</td></tr>
+<tr><td>Obfuscation</td><td>Span fragmentation + garbage injection</td><td>None</td></tr>
+<tr><td>Click destination</td><td>Google Cloud Storage (trusted CDN)</td><td>Google Cloud VM raw IP</td></tr>
+<tr><td>Both use Google infra</td><td>Yes -- GCS bucket</td><td>Yes -- GCP VM</td></tr>
+<tr><td>Sophistication</td><td><span style="background:#e36209;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.85em">HIGH</span></td><td><span style="background:#9a6700;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.85em">MEDIUM</span></td></tr>
+</table><p>Both the iCloud phish and Harry &amp; David scam use Google infrastructure for the click destination -- GCS bucket and GCP VM respectively. This is likely coincidence (Google infrastructure is widely abused for exactly these purposes) rather than the same operator.</p><p>
+<h2>Tool Coverage</h2><table><tr><th>Tool</th><th>Result</th><th>Notes</th></tr>
+<tr><td>VirusTotal domain API</td><td>OK</td><td>fexorlink.biz: no creation date, 0/0; efianalytics.com: 6734d, 1 malicious</td></tr>
+<tr><td>VirusTotal IP API</td><td>OK</td><td>154.29.78.158: 0 mal 0 harm; 216.244.76.116: 1 malicious 59 harmless</td></tr>
+<tr><td>DNSBL (Spamhaus ZEN, SpamCop)</td><td>OK</td><td>154.29.78.158 LISTED on zen.spamhaus.org 127.0.0.4 (PBL)</td></tr>
+<tr><td>Shodan InternetDB</td><td>OK</td><td>154.29.78.158: ports 25/80/1234/8181, self-signed; 216.244.76.116: no data</td></tr>
+<tr><td>urlscan.io</td><td>SKIP</td><td>URLSCAN_API_KEY not configured</td></tr>
+<tr><td>crt.sh</td><td>SKIP</td><td>VT domain API sufficient for age data</td></tr>
+<tr><td>DNS resolution</td><td>OK</td><td>1 issue encountered, 1 resolved (fexorlink.biz no A record -- expected for send-only domain)</td></tr>
+<tr><td>BiDi decode</td><td>N/A</td><td>No RTL spans found; character fragmentation obfuscation is a different technique (no decode needed -- each span contains one visible character)</td></tr>
+<tr><td>Header analysis</td><td>OK</td><td>Full Received chain, DKIM, SPF, DomainKey-Signature, ARC, delegation headers</td></tr>
+</table><p>
+<h2>Recommendation</h2><p>Do not interact with this email. Treat all links as malicious.</p><p>Immediate steps:
+<ul><li>Do not click the "Update my payment details" button or any other link</li>
+<li>Delete the email and report it as phishing in Gmail (three-dot menu &gt; Report phishing)</li>
+<li>Report the phishing page to Google: https://safebrowsing.google.com/safebrowsing/report_phish/ -- paste the storage.googleapis.com URL. This causes Google to revoke the bucket's public access, protecting other potential victims.</li>
+<li>Check your actual iCloud account status directly at appleid.apple.com (not from email links)</li>
+</ul><p>If you already clicked and entered information:
+<ul><li>Apple ID credentials: change password immediately at appleid.apple.com, enable two-factor authentication</li>
+<li>Payment card details: contact your bank to report potential fraud and request a card replacement</li>
+</ul><p>Broader context:
+<ul><li>The victim@example.com address appears in consumer-targeting lists associated with Apple device users. Expect future Apple/iCloud-themed phishing to this address.</li>
+<li>Consider enabling Gmail's Enhanced Safe Browsing, which provides faster phishing detection for your account.</li>
+</ul><p>
+<h2>Cleanup</h2><table><tr><th>Item</th><th>Status</th></tr>
+<tr><td>Source .eml file</td><td>Read-only analysis -- file untouched at C:\Users\[user]\Downloads\blocked-account-icloud-phish.eml</td></tr>
+<tr><td>Links visited by host</td><td>None</td></tr>
+<tr><td>Temporary scripts</td><td>C:\temp\icloud-phish-checks.ps1 -- safe to delete</td></tr>
+</table><p>
+---
+Canary v2.8  use at your own risk. This tool reduces risk but does not guarantee safety.
+No security evaluation is a substitute for your own judgment.
+https://github.com/AppDevOnly/canary</p><p>This report references the MITRE ATT&amp;CK(R) knowledge base. MITRE ATT&amp;CK(R) is a registered
+trademark of The MITRE Corporation, used under CC BY 4.0. https://attack.mitre.org
+</p></body>
 </html>

@@ -22,7 +22,176 @@
   @media print { h1 { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
 </style>
 </head>
-<body>
-$body
-</body>
+<body><h1 style="background:#0d6b6b;color:#fff;padding:1.25rem 1.5rem;border-radius:6px;margin-bottom:1.5rem;line-height:1.6;border:none"><span style="font-size:1.5rem;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;display:block;margin-bottom:4px">Canary Security Report</span><span style="font-size:0.9rem;font-weight:400;opacity:0.88;display:block">Target: &quot;hsliuping/TradingAgents-CN&quot;</span><span style="font-size:0.9rem;font-weight:700;display:block">Verdict: [!] Caution</span></h1><table><tr><th>Field</th><th>Value</th></tr>
+<tr><td>Date</td><td>2026-03-25</td></tr>
+<tr><td>Target</td><td>https://github.com/hsliuping/TradingAgents-CN</td></tr>
+<tr><td>Evaluation</td><td>Quick -- Static Analysis</td></tr>
+<tr><td>Tool</td><td>Canary v2.8</td></tr>
+</table><p>
+<h2>Reading This Report</h2><table><tr><th>Report Verdict</th><th>Meaning</th><th>What to do</th></tr>
+<tr><td><span style="background:#1a5c35;color:#fff;padding:2px 8px;border-radius:3px;font-size:0.85em;font-weight:600;white-space:nowrap">[OK] Safe</span></td><td>No significant issues found.</td><td>Safe for normal use.</td></tr>
+<tr><td><span style="background:#0d6b6b;color:#fff;padding:2px 8px;border-radius:3px;font-size:0.85em;font-weight:600;white-space:nowrap">[!] Caution</span></td><td>Issues found, no proof of intentional harm.</td><td>Read findings before using.</td></tr>
+<tr><td><span style="background:#8b0000;color:#fff;padding:2px 8px;border-radius:3px;font-size:0.85em;font-weight:600;white-space:nowrap">[X] Unsafe - Hidden Threat</span></td><td>Software does something harmful without your knowledge (backdoor, data theft, exfiltration).</td><td>Do not install.</td></tr>
+<tr><td><span style="background:#8b0000;color:#fff;padding:2px 8px;border-radius:3px;font-size:0.85em;font-weight:600;white-space:nowrap">[X] Unsafe - Dangerous by Design</span></td><td>Software's purpose is inherently dangerous (exploit kit, C2 framework, RAT, keylogger).</td><td>Do not install without understanding the implications.</td></tr>
+<tr><td><span style="background:#1e3a5f;color:#fff;padding:2px 8px;border-radius:3px;font-size:0.85em;font-weight:600;white-space:nowrap">[?] Researcher Mode</span></td><td>Offensive tool scanned at user's request.</td><td>No safety verdict issued.</td></tr>
+</table><table><tr><th>Findings Severity</th><th>Meaning</th></tr>
+<tr><td><span style="background:#cf222e;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.85em">CRITICAL</span></td><td>Immediate threat. Do not proceed until resolved.</td></tr>
+<tr><td><span style="background:#e36209;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.85em">HIGH</span></td><td>Serious risk with direct security or reliability impact.</td></tr>
+<tr><td><span style="background:#9a6700;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.85em">MEDIUM</span></td><td>Notable issue. Manageable with specific mitigations.</td></tr>
+<tr><td><span style="background:#57606a;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.85em">LOW</span></td><td>Minor concern. Low likelihood or low impact.</td></tr>
+<tr><td><span style="background:#0969da;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.85em">INFO</span></td><td>Informational only. No action required.</td></tr>
+</table><table><tr><th>Security Domain</th><th>Question being answered</th></tr>
+<tr><td>Confidentiality</td><td>Will this software keep my data private?</td></tr>
+<tr><td>Integrity</td><td>Is this software what it claims to be?</td></tr>
+<tr><td>Availability</td><td>Will my systems keep working after I install it?</td></tr>
+</table><p>
+<h2>Verdict: [!] Caution</h2><p>The code itself is not malicious, but the default Docker deployment ships with hardcoded database passwords and a well-known weak Application Programming Interface (API) secret in the public repository -- meaning a default install is insecure out of the box and anyone who clones the repo already knows your credentials.</p><p>
+<h2>Executive Summary</h2><p>TradingAgents-CN is a Chinese-language enhancement of the TradingAgents multi-agent Large Language Model (LLM) framework for analyzing Chinese A-share stocks using models including DeepSeek, Qwen, and Google Gemini. It is a substantial full-stack application (2,278 files) with a FastAPI backend, Vue 3 frontend, MongoDB, Redis, and an extensive set of financial data integrations. The code is not malicious. The concerns are deployment security and licensing: docker-compose.yml commits five default database passwords in plaintext, the app defaults to a well-known JWT secret, CORS and host policies default to open, and the repository carries a split license -- Apache 2.0 for the upstream framework layer, but a proprietary license covering the app/ and frontend/ directories that restricts commercial use and modification.</p><p>This is a static analysis only -- runtime behavior was not observed.</p><table><tr><th>Severity</th><th>Count</th></tr>
+<tr><td>Critical</td><td>0</td></tr>
+<tr><td>High</td><td>2</td></tr>
+<tr><td>Medium</td><td>4</td></tr>
+<tr><td>Low</td><td>0</td></tr>
+<tr><td>Info</td><td>1</td></tr>
+</table><p>Recommendation: Safe to evaluate and run locally for personal research. Do not deploy as a service without addressing both HIGH findings first, and read the proprietary license before incorporating the app/ or frontend/ code into any commercial project.</p><p>
+<h2>Findings Summary</h2><table><tr><th>#</th><th>Severity</th><th>Domain</th><th>Category</th><th>Artifacts</th><th>What was found</th></tr>
+<tr><td>1</td><td><span style="background:#e36209;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.85em">HIGH</span></td><td>Confidentiality</td><td>Secrets</td><td>docker-compose.yml</td><td>Five hardcoded database passwords committed to repo</td></tr>
+<tr><td>2</td><td><span style="background:#e36209;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.85em">HIGH</span></td><td>Confidentiality</td><td>Security</td><td>app/core/config.py:72</td><td>Weak JWT default secret -- auth tokens forgeable on default deploy</td></tr>
+<tr><td>3</td><td><span style="background:#9a6700;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.85em">MEDIUM</span></td><td>Availability</td><td>Security</td><td>app/core/config.py:24-26</td><td>Wildcard CORS and DEBUG mode enabled by default</td></tr>
+<tr><td>4</td><td><span style="background:#9a6700;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.85em">MEDIUM</span></td><td>Integrity</td><td>Security</td><td>requirements.txt:14</td><td>Anti-scraping TLS fingerprint bypass library included as dependency</td></tr>
+<tr><td>5</td><td><span style="background:#9a6700;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.85em">MEDIUM</span></td><td>Integrity</td><td>Dependencies</td><td>pyproject.toml, requirements.txt</td><td>Unpinned LangChain ecosystem dependencies</td></tr>
+<tr><td>6</td><td><span style="background:#9a6700;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.85em">MEDIUM</span></td><td>Integrity</td><td>License</td><td>LICENSE, app/LICENSE</td><td>Proprietary license restricts app/ and frontend/ use</td></tr>
+<tr><td>7</td><td><span style="background:#0969da;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.85em">INFO</span></td><td>Availability</td><td>Quality</td><td>--</td><td>Test quality not assessed at Quick tier</td></tr>
+</table><p>
+<h2>Findings</h2><p>
+<h3>1. Five hardcoded database passwords committed to repo</h3><table><tr><th>Field</th><th>Value</th></tr>
+<tr><td>Severity</td><td><span style="background:#e36209;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.85em">HIGH</span></td></tr>
+<tr><td>Domain</td><td>Confidentiality</td></tr>
+<tr><td>Category</td><td>Secrets</td></tr>
+<tr><td>File</td><td>docker-compose.yml</td></tr>
+<tr><td>MITRE</td><td>T1552.001 - Credential Access: Unsecured Credentials: Credentials In Files</td></tr>
+</table><p>Anyone who clones this repo and runs <code>docker-compose up</code> gets a MongoDB instance, Redis cache, and MongoExpress admin panel secured only by <code>tradingagents123</code> -- a password now public in a repository with over 21,000 stars. The password appears in five locations in docker-compose.yml: <code>MONGO_INITDB_ROOT_PASSWORD</code>, <code>ME_CONFIG_MONGODB_ADMINPASSWORD</code>, <code>ME_CONFIG_BASICAUTH_PASSWORD</code>, <code>TRADINGAGENTS_REDIS_URL</code>, and the MongoDB connection string for the app service. The MongoExpress admin panel is particularly sensitive -- it exposes a full database management UI with no additional protection beyond this shared password. Because these credentials are in docker-compose.yml rather than an .env.example file, they are live regardless of whether the user creates a .env file.</p><p><strong>Fix:</strong>
+<ul><li>Remove all hardcoded password values from docker-compose.yml; replace with <code>${MONGODB_PASSWORD}</code> and <code>${REDIS_PASSWORD}</code> environment variable references</li>
+<li>Generate strong random passwords before first deploy: <code>python -c "import secrets; print(secrets.token_urlsafe(24))"</code></li>
+<li>If you have already deployed with the default password, rotate all five credential locations now</li>
+</ul><p><strong>Countermeasure:</strong> Store credentials in a secrets manager (HashiCorp Vault, Docker Secrets, or a <code>.env</code> file excluded from version control) rather than in any committed file. (D3FEND: D3-STOG Secrets Management)</p><p>
+<h3>2. Weak default JWT secret -- authentication tokens are forgeable</h3><table><tr><th>Field</th><th>Value</th></tr>
+<tr><td>Severity</td><td><span style="background:#e36209;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.85em">HIGH</span></td></tr>
+<tr><td>Domain</td><td>Confidentiality</td></tr>
+<tr><td>Category</td><td>Security</td></tr>
+<tr><td>File</td><td>app/core/config.py:72</td></tr>
+<tr><td>MITRE</td><td>T1552.001 - Credential Access: Unsecured Credentials: Credentials In Files</td></tr>
+</table><p>The application defaults <code>JWT_SECRET = "change-me-in-production"</code> if no environment variable is set. JSON Web Tokens (JWTs) are signed with this secret, so anyone who knows the value -- and it is now public in a repository with 21,000 stars -- can forge valid authentication tokens for any user account, including admin accounts. Any deployment that has not explicitly set <code>JWT_SECRET</code> in its environment is fully compromised before the first real user logs in.</p><p><strong>Fix:</strong>
+<ul><li>Set <code>JWT_SECRET</code> to a cryptographically random value before deploying: <code>python -c "import secrets; print(secrets.token_urlsafe(32))"</code></li>
+<li>Add a startup check that refuses to launch if <code>JWT_SECRET</code> still matches the default value or is shorter than 32 characters</li>
+</ul><p><strong>Countermeasure:</strong> Enforce secrets validation at startup -- reject well-known placeholder values and require minimum entropy before the application accepts requests. (D3FEND: D3-STOG Secrets Management)</p><p>
+<h3>3. Wildcard CORS and DEBUG mode enabled by default</h3><table><tr><th>Field</th><th>Value</th></tr>
+<tr><td>Severity</td><td><span style="background:#9a6700;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.85em">MEDIUM</span></td></tr>
+<tr><td>Domain</td><td>Availability</td></tr>
+<tr><td>Category</td><td>Security</td></tr>
+<tr><td>File</td><td>app/core/config.py:24-26</td></tr>
+</table><p><code>ALLOWED_ORIGINS: ["*"]</code> and <code>ALLOWED_HOSTS: ["*"]</code> mean the API will accept cross-origin requests from any domain, and <code>DEBUG: True</code> by default exposes stack traces and detailed error output. Combined, any deployment that does not override these settings is wider open than the developers likely intend. Cross-Origin Resource Sharing (CORS) wildcard in combination with JWT authentication creates a meaningful attack surface for cross-site request forgery on a deployed service.</p><p><strong>Fix:</strong>
+<ul><li>Set <code>ALLOWED_ORIGINS</code> to the specific domains that should access your API</li>
+<li>Set <code>DEBUG=false</code> in your production .env file</li>
+<li>Set <code>ALLOWED_HOSTS</code> to your actual hostname</li>
+</ul><p>
+<h3>4. Anti-scraping TLS fingerprint bypass library</h3><table><tr><th>Field</th><th>Value</th></tr>
+<tr><td>Severity</td><td><span style="background:#9a6700;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.85em">MEDIUM</span></td></tr>
+<tr><td>Domain</td><td>Integrity</td></tr>
+<tr><td>Category</td><td>Security</td></tr>
+<tr><td>File</td><td>requirements.txt:14</td></tr>
+</table><p>The dependency <code>curl-cffi&gt;=0.6.0</code> is documented in a Chinese-language code comment as a tool to "simulate real browser TLS fingerprints to bypass anti-scraping detection" (<code>æ¨¡æ‹ŸçœŸå®žæµè§ˆå™¨TLSæŒ‡çº¹ï¼Œç»•è¿‡åçˆ¬è™«æ£€æµ‹</code>). This library impersonates browser TLS handshakes to evade bot-detection systems. This is the intended, documented use -- not hidden behavior -- but it may violate the Terms of Service (ToS) of the data providers whose protections it is designed to circumvent. The config explicitly lists eastmoney.com in a NO_PROXY configuration, suggesting the scraping target is known and intentional.</p><p><strong>Fix:</strong>
+<ul><li>Verify you have permission to scrape each data source this tool accesses</li>
+<li>Review whether eastmoney.com data use complies with their Terms of Service before relying on it for any production or commercial use</li>
+</ul><p>
+<h3>5. Unpinned LangChain ecosystem dependencies</h3><table><tr><th>Field</th><th>Value</th></tr>
+<tr><td>Severity</td><td><span style="background:#9a6700;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.85em">MEDIUM</span></td></tr>
+<tr><td>Domain</td><td>Integrity</td></tr>
+<tr><td>Category</td><td>Dependencies</td></tr>
+<tr><td>File</td><td>pyproject.toml, requirements.txt</td></tr>
+</table><p>The vast majority of dependencies use <code>&gt;=</code> constraints with no upper bound -- for example <code>langchain-openai&gt;=0.3.23</code>, <code>langgraph&gt;=0.4.8</code>, <code>openai&gt;=1.0.0,&lt;2.0.0</code>. This means a supply chain compromise of any of these packages would automatically reach all users on their next install or <code>pip upgrade</code>. The LangChain ecosystem in particular is a meaningful supply chain target given its widespread adoption, and has a documented history of breaking changes between minor versions.</p><p>Severity is MEDIUM at minimum -- automated Common Vulnerabilities and Exposures (CVE) audit (pip-audit, npm audit) requires Medium or Full mode to determine whether any currently unpinned dependency has a known vulnerability.</p><p><strong>Fix:</strong>
+<ul><li>Pin major dependencies to known-good versions in production: <code>langchain-openai==0.3.23</code></li>
+<li>Use pip-audit or Dependabot to monitor for CVEs in pinned versions</li>
+</ul><p><strong>Countermeasure:</strong> Integrate a Software Composition Analysis (SCA) tool (pip-audit, Dependabot, Snyk) into your CI pipeline to catch vulnerable dependency versions before they ship. (D3FEND: D3-SCF Software Composition Analysis)</p><p>
+<h3>6. Proprietary license restricts app/ and frontend/ use</h3><table><tr><th>Field</th><th>Value</th></tr>
+<tr><td>Severity</td><td><span style="background:#9a6700;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.85em">MEDIUM</span></td></tr>
+<tr><td>Domain</td><td>Integrity</td></tr>
+<tr><td>Category</td><td>License</td></tr>
+<tr><td>File</td><td>LICENSE, app/LICENSE</td></tr>
+</table><p>The repository carries a split license. The root LICENSE file grants Apache 2.0 for the upstream TradingAgents framework layer. A separate <code>app/LICENSE</code> file (covering the app/ and frontend/ directories -- the majority of novel code in this repo) carries a proprietary license that explicitly prohibits commercial use without written permission and restricts modification and redistribution. Anyone who forks this project, uses it in a commercial context, or incorporates the app/ or frontend/ code into another project without contacting the author is in violation of that license. The README does not prominently disclose this restriction.</p><p><strong>Fix:</strong>
+<ul><li>If you are evaluating this for personal, non-commercial research use: no action required</li>
+<li>If you plan to use app/ or frontend/ code commercially or redistribute a modified version: contact the author before proceeding</li>
+<li>If you are building on top of this for a product: legal review is strongly recommended before the project advances</li>
+</ul><p>
+<h3>7. Test quality not assessed at Quick tier</h3><table><tr><th>Field</th><th>Value</th></tr>
+<tr><td>Severity</td><td><span style="background:#0969da;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.85em">INFO</span></td></tr>
+<tr><td>Domain</td><td>Availability</td></tr>
+<tr><td>Category</td><td>Quality</td></tr>
+<tr><td>File</td><td>--</td></tr>
+</table><p>507 test files exist in the repository, so test infrastructure is present. Test quality, coverage percentage, and whether the tests actually run against real dependencies could not be assessed at Quick tier.</p><p>
+<h2>Security Analysis</h2><table><tr><th>Area</th><th>What was observed</th></tr>
+<tr><td>Network activity</td><td>Contacts OpenAI, Google AI, DeepSeek, AliCloud DashScope APIs; eastmoney.com and Tushare/Baostock/AKShare for Chinese stock data. All documented and expected for this tool's stated purpose. curl-cffi is used to bypass TLS fingerprinting on some data sources.</td></tr>
+<tr><td>Credentials</td><td>API keys read from environment variables (good practice). Default database passwords and JWT secret hardcoded in shipped files (bad).</td></tr>
+<tr><td>Persistence</td><td>None detected. No writes to startup locations, cron, or registry.</td></tr>
+<tr><td>Process behavior</td><td>No subprocess calls with shell=True observed. Standard FastAPI/Python process model. No obfuscated payloads.</td></tr>
+</table><p>
+<h2>Network Indicators</h2><p>_(Include when deploying this software or building network-level defenses. All destinations below are documented in the codebase and consistent with the tool's stated purpose. None are indicators of malicious behavior -- they are included here for network policy and firewall rule purposes.)_</p><p><pre><code># AI provider APIs (expected -- core functionality)
+api.openai.com
+generativelanguage.googleapis.com
+api.deepseek.com
+dashscope.aliyuncs.com
+
+# Chinese financial data sources
+data.eastmoney.com
+api.tushare.pro
+api.baostock.com
+akshare.akfamily.com (AKShare)
+
+# Ports
+443 (HTTPS -- all above endpoints)
+</code></pre></p><p>Note: eastmoney.com is accessed via curl-cffi TLS fingerprint bypass (see Finding 4). The other endpoints use standard HTTPS. No hardcoded IP addresses or non-standard ports were observed.</p><p>
+<h2>Dependency Audit</h2><p>Automated dependency audit requires Medium or Full. Manual NVD review of direct dependencies found: no known critical CVEs in the dependency set as of 2026-03-25. The PyJWT, bcrypt, and cryptography packages are current. The primary risk is unpinned transitive dependencies in the LangChain ecosystem rather than specific known CVEs in pinned versions.</p><p>Note: unpinned dependencies were found (Finding 5). The MEDIUM severity on that finding is a lower bound -- any of those packages may have known CVEs that only a full pip-audit/npm-audit run (Medium or Full mode) can surface. Do not treat the absence of CVE findings here as a clean bill of health.</p><p>
+<h2>Code Quality</h2><p>Not evaluated -- run a Medium or Full evaluation for code quality analysis.</p><p>
+<h2>Sandbox Results</h2><p>Not evaluated -- run a Full evaluation to observe runtime behavior.</p><p>
+<h2>Bugs Found</h2><p>Not evaluated -- automated bug analysis runs at Medium or Full tier.</p><p>
+<h2>Recommendation</h2><p>Safe to install and run locally for personal, non-commercial research. Do not deploy as a service without addressing both HIGH findings first.</p><p>Before you expose this to any network:
+<ul><li>Replace all five hardcoded passwords in docker-compose.yml with .env variable references and generate strong random values</li>
+<li>Set <code>JWT_SECRET</code> to a cryptographically random value (32+ characters) in your .env file</li>
+<li>Set <code>DEBUG=false</code>, <code>ALLOWED_ORIGINS</code> to your actual domain, and <code>ALLOWED_HOSTS</code> to your hostname</li>
+</ul><p>Before any commercial or redistributed use:
+<ul><li>Read app/LICENSE carefully and contact the author if you need commercial rights</li>
+</ul><p>For local personal use only:
+<ul><li>The credential defaults are inconvenient but not immediately dangerous if the ports (8000, 27017, 6379, 8081) are not exposed outside your machine</li>
+</ul><p>To observe what this software actually does at runtime, run <code>/canary https://github.com/hsliuping/TradingAgents-CN full</code> -- this runs it inside Windows Sandbox with network and process monitoring.</p><p><strong>Pivot Recommendations:</strong>
+<ul><li>Run <code>/canary pip:curl-cffi quick</code> to evaluate the anti-scraping bypass library directly before relying on it</li>
+<li>Check git history for when the proprietary app/LICENSE was added -- the upstream TradingAgents project is Apache 2.0, so this restriction was added by the fork author</li>
+<li>Search VirusTotal passive DNS for eastmoney.com to assess the scraping target's infrastructure if ToS compliance matters for your use case</li>
+<li>If deploying: add api.tushare.pro and dashscope.aliyuncs.com to your egress allowlist and block all other unexpected outbound connections at the network layer</li>
+</ul><p>
+<h2>MITRE ATT&amp;CK</h2><p>Techniques mapped from findings in this evaluation.
+Full descriptions: https://attack.mitre.org</p><p>MITRE ATT&amp;CK(R) is a registered trademark of The MITRE Corporation and is used in accordance with the MITRE ATT&amp;CK Terms of Use. Technique mappings in this report reference the MITRE ATT&amp;CK knowledge base, published under CC BY 4.0.
+https://attack.mitre.org/resources/terms-of-use/</p><table><tr><th>Tactic</th><th>ID</th><th>Technique</th><th>Observed</th></tr>
+<tr><td>TA0006 Credential Access</td><td>T1552.001</td><td>Unsecured Credentials: Credentials In Files</td><td>Five plaintext database passwords and a weak JWT secret hardcoded in docker-compose.yml and config.py</td></tr>
+<tr><td>TA0001 Initial Access</td><td>T1195.001</td><td>Supply Chain Compromise: Compromise Software Dependencies and Development Tools</td><td>Unpinned &gt;= constraints across LangChain ecosystem; a compromised package version would reach all users automatically</td></tr>
+</table><p>
+<h2>VirusTotal</h2><p>Not evaluated -- no binaries found in this repository. Set <code>VT_API_KEY</code> to enable URL and binary checks if binaries are added in future releases.</p><p>
+<h2>Cleanup</h2><table><tr><th>Item</th><th>Status</th></tr>
+<tr><td>Target files / clone</td><td>No clone created (Application Programming Interface-only scan)</td></tr>
+<tr><td>Sandbox output files</td><td>n/a (Quick scan)</td></tr>
+<tr><td>Scan temp dir</td><td>n/a (Quick scan)</td></tr>
+<tr><td>Software Bill of Materials (SBOM)</td><td>Not generated (Quick scan)</td></tr>
+</table><p>
+<h2>Token Usage</h2><table><tr><th>Metric</th><th>Value</th></tr>
+<tr><td>Input tokens</td><td>29</td></tr>
+<tr><td>Output tokens</td><td>6,547</td></tr>
+<tr><td>Cache read tokens</td><td>4,388,727 (100% of input served from cache)</td></tr>
+<tr><td>Cache write tokens</td><td>27,233</td></tr>
+<tr><td>Estimated cost</td><td>~$1.52 (Sonnet 4.6 pricing)</td></tr>
+<tr><td>Repo / codebase size</td><td>Large (2,278 files)</td></tr>
+</table><hr>
+Canary v2.8 -- use at your own risk. This tool reduces risk but does not guarantee safety.
+No security evaluation is a substitute for your own judgment. Review findings before
+installing any software. https://github.com/AppDevOnly/canary</p><p>This report may reference the MITRE ATT&amp;CK(R) knowledge base. MITRE ATT&amp;CK(R) is a
+registered trademark of The MITRE Corporation, used under CC BY 4.0.
+https://attack.mitre.org
+</p></body>
 </html>
