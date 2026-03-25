@@ -3879,7 +3879,7 @@ $verdictText = if ($md -match 'Verdict: (\[.+?\][^\r\n]+)') { $Matches[1].Trim()
 # Severity uses bright alert colors (CRITICAL=#cf222e, HIGH=#e36209, MEDIUM=#9a6700, INFO=#0969da)
 # Verdict uses deep judgment colors in the same hue families but richer and darker
 $verdictColor = if     ($verdictText -match '^\[X\]')  { '#8b0000' }   # deep crimson (vs CRITICAL bright red)
-                elseif ($verdictText -match '^\[!\]')  { '#0d6b6b' }   # deep teal (distinct from MEDIUM amber #9a6700)
+                elseif ($verdictText -match '^\[!\]')  { '#8b7a00' }   # deep yellow (distinct from MEDIUM amber #9a6700)
                 elseif ($verdictText -match '^\[OK\]') { '#1a5c35' }   # forest green (not in severity palette)
                 elseif ($verdictText -match '^\[\?\]') { '#1e3a5f' }   # deep navy (vs INFO bright blue)
                 else                                   { '#374151' }   # charcoal
@@ -3984,7 +3984,7 @@ $body = [regex]::Replace($body, '(<td>)(INFO)(<\/td>)',     '$1<span style="back
 # Report verdict badges in Reading This Report table (deep judgment palette)
 $vb = 'color:#fff;padding:2px 8px;border-radius:3px;font-size:0.85em;font-weight:600;white-space:nowrap'
 $body = [regex]::Replace($body, '(<td>)(\[OK\] Safe)(<\/td>)',                        '$1<span style="background:#1a5c35;' + $vb + '">[OK] Safe</span>$3')
-$body = [regex]::Replace($body, '(<td>)(\[!\] Caution)(<\/td>)',                      '$1<span style="background:#0d6b6b;' + $vb + '">[!] Caution</span>$3')
+$body = [regex]::Replace($body, '(<td>)(\[!\] Caution)(<\/td>)',                      '$1<span style="background:#8b7a00;' + $vb + '">[!] Caution</span>$3')
 $body = [regex]::Replace($body, '(<td>)(\[X\] Unsafe - Hidden Threat)(<\/td>)',       '$1<span style="background:#8b0000;' + $vb + '">[X] Unsafe - Hidden Threat</span>$3')
 $body = [regex]::Replace($body, '(<td>)(\[X\] Unsafe - Dangerous by Design)(<\/td>)', '$1<span style="background:#8b0000;' + $vb + '">[X] Unsafe - Dangerous by Design</span>$3')
 $body = [regex]::Replace($body, '(<td>)(\[\?\] Researcher Mode)(<\/td>)',              '$1<span style="background:#1e3a5f;' + $vb + '">[?] Researcher Mode</span>$3')
