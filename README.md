@@ -132,6 +132,13 @@ The installer checks both and walks you through anything that's missing.
 
 ---
 
+## Example reports
+
+- [Code scan: hsliuping/TradingAgents-CN](https://appdevonly.github.io/canary/examples/code-scan-TradingAgents-CN.html) -- [!] Caution, Quick mode
+- [Email analysis: iCloud phishing](https://appdevonly.github.io/canary/examples/email-analysis-icloud-phishing.html) -- [X] Phishing
+
+---
+
 ## What you get
 
 A structured plain-text report saved to `~/canary-reports/`:
