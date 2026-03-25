@@ -123,6 +123,106 @@ If the user runs `/canary eml <path>`, or provides a path ending in `.eml`, anal
 1. Headers (everything before the blank line separating headers from body)
 2. Body parts (plain text, HTML, attachments identified by Content-Type)
 
+**Initialize state file for token tracking** immediately after parsing the file, before any API calls:
+
+```powershell
+# Derive slug from filename: strip non-alphanumeric to [a-zA-Z0-9_-]
+$targetSlug = [System.IO.Path]::GetFileNameWithoutExtension($emlPath) -replace '[^a-zA-Z0-9_-]', '-'
+$stateFile = "$env:USERPROFILE\canary-reports\$targetSlug-state.json"
+
+$currentSessionFile = Get-ChildItem "$env:USERPROFILE\.claude\projects\" -Recurse -Filter '*.jsonl' |
+    Where-Object { $_.Name -notmatch '^agent-' } |
+    Sort-Object LastWriteTime -Descending |
+    Select-Object -First 1 -ExpandProperty FullName
+
+# Load existing state (resume) or create fresh
+if (Test-Path $stateFile) {
+    $state = Get-Content $stateFile -Raw | ConvertFrom-Json
+    # Detect session rollover (new JSONL file since last run)
+    if ($state.session_file -and $currentSessionFile -ne $state.session_file) {
+        $prior = @{ file=$state.session_file; start_time=$state.session_start_time; end_time=(Get-Date -Format 'o') }
+        if (-not $state.prior_sessions) { $state | Add-Member -NotePropertyName prior_sessions -NotePropertyValue @() -Force }
+        $state.prior_sessions += $prior
+        $state.session_file = $currentSessionFile
+        $state.session_start_time = (Get-Date -Format 'o')
+        $state.session_end_time = $null
+    }
+} else {
+    $state = [PSCustomObject]@{
+        target            = $emlPath
+        target_slug       = $targetSlug
+        date              = (Get-Date -Format 'yyyy-MM-dd')
+        session_file      = $currentSessionFile
+        session_start_time = (Get-Date -Format 'o')
+        session_end_time  = $null
+        prior_sessions    = @()
+        cleanup_complete  = $false
+    }
+}
+$state | ConvertTo-Json -Depth 5 | Out-File $stateFile -Encoding UTF8 -Force
+```
+
+**Token calculation at report-write time** (add to Cleanup block, before deleting state file):
+
+```powershell
+# Record session end time
+$state.session_end_time = (Get-Date -Format 'o')
+$state | ConvertTo-Json -Depth 5 | Out-File $stateFile -Encoding UTF8 -Force
+
+# Build session list: prior (rolled-over) + current
+$sessions = [System.Collections.Generic.List[object]]::new()
+if ($state.prior_sessions) {
+    foreach ($ps in $state.prior_sessions) {
+        $sessions.Add(@{ file=$ps.file; start=[datetime]$ps.start_time; end=[datetime]$ps.end_time })
+    }
+}
+$sessions.Add(@{ file=$state.session_file; start=[datetime]$state.session_start_time; end=[datetime]$state.session_end_time })
+
+# Count tokens across all sessions (using $inTok -- never $input, which is a reserved PS variable)
+$inTok = 0; $output = 0; $cacheRead = 0; $cacheCreate = 0
+foreach ($sess in $sessions) {
+    if (-not (Test-Path $sess.file)) { continue }
+    Get-Content $sess.file | ForEach-Object {
+        try {
+            $j = $_ | ConvertFrom-Json -ErrorAction Stop
+            if ($j.message.usage -and $j.timestamp) {
+                $msgTime = [datetime]$j.timestamp
+                if ($msgTime -ge $sess.start -and $msgTime -le $sess.end) {
+                    $u = $j.message.usage
+                    $inTok       += if ($u.input_tokens)                { $u.input_tokens }                else { 0 }
+                    $output      += if ($u.output_tokens)               { $u.output_tokens }               else { 0 }
+                    $cacheRead   += if ($u.cache_read_input_tokens)     { $u.cache_read_input_tokens }     else { 0 }
+                    $cacheCreate += if ($u.cache_creation_input_tokens) { $u.cache_creation_input_tokens } else { 0 }
+                }
+            }
+        } catch {}
+    }
+}
+# Sonnet 4.6 pricing: $3/M input, $15/M output, $0.30/M cache read, $3.75/M cache write
+$cost = ($inTok / 1e6 * 3) + ($output / 1e6 * 15) + ($cacheRead / 1e6 * 0.30) + ($cacheCreate / 1e6 * 3.75)
+Write-Host "sessions=$($sessions.Count) input=$inTok output=$output cache_read=$cacheRead cache_create=$cacheCreate cost=$([math]::Round($cost,4))"
+
+# Delete state file -- scan complete
+Remove-Item $stateFile -ErrorAction SilentlyContinue
+```
+
+Add a Token Usage section to the email report (same format as code scan reports):
+
+```
+## Token Usage
+
+| Metric | Value |
+|--------|-------|
+| Input tokens | <N> |
+| Output tokens | <N> |
+| Cache read tokens | <N> (<X>% of input served from cache) |
+| Cache write tokens | <N> |
+| Estimated cost | ~$<N> (Sonnet 4.6 pricing) |
+```
+
+Cache read % = cache_read / (input + cache_read) * 100, rounded to nearest integer.
+If session_count > 1, note "N sessions (context window rollover)" in the table.
+
 ---
 
 ### Step 1 -- Header analysis
@@ -661,6 +761,13 @@ Plain-English explanation of what this means for the recipient. Technical detail
   MEDIUM or above where a systemic defensive control is applicable.)_
 
 
+## Recommendation
+
+Plain English: do not reply / do not click / report as phishing / report to IC3.gov / etc.
+Immediate steps numbered list.
+Broader context if the recipient's details appear in fraud networks.
+
+
 ## MITRE ATT&CK
 
 Techniques mapped from findings in this evaluation.
@@ -671,37 +778,28 @@ with the MITRE ATT&CK Terms of Use. Technique mappings in this report reference 
 ATT&CK knowledge base, which is published under the Creative Commons Attribution 4.0 license.
 https://attack.mitre.org/resources/terms-of-use/
 
-List each technique observed, grouped by tactic. Only include tactics that have at least
-one mapped finding. Omit tactics with no findings. Format:
+List each technique observed as a table. Only include rows for techniques actually observed.
+Omit rows with no findings. Format:
 
-  TA0042 Resource Development
-    T1585.001  Establish Accounts: Social Media Accounts
+| Tactic | ID | Technique | Observed |
+|--------|----|-----------|----------|
+| TA0042 Resource Development | T1585.001 | Establish Accounts: Social Media Accounts | <one-line observation> |
+| TA0001 Initial Access | T1566.001 | Phishing: Spearphishing Attachment | <one-line observation> |
+| TA0001 Initial Access | T1566.002 | Phishing: Spearphishing Link | <one-line observation> |
+| TA0001 Initial Access | T1566.003 | Phishing: Spearphishing via Service | <one-line observation> |
+| TA0005 Defense Evasion | T1027 | Obfuscated Files or Information | <one-line observation> |
+| TA0005 Defense Evasion | T1036 | Masquerading | <one-line observation> |
+| TA0006 Credential Access | T1056.003 | Input Capture: Web Portal Capture | <one-line observation> |
+| TA0006 Credential Access | T1598.003 | Phishing for Information: Spearphishing Link | <one-line observation> |
+| TA0040 Impact | T1657 | Financial Theft | <one-line observation> |
+| TA0043 Reconnaissance | T1593.001 | Search Open Websites/Domains: Social Media | <one-line observation> |
+| TA0043 Reconnaissance | T1589.002 | Gather Victim Identity Information: Email Addresses | <one-line observation> |
 
-  TA0001 Initial Access
-    T1566.001  Phishing: Spearphishing Attachment
-    T1566.002  Phishing: Spearphishing Link
-    T1566.003  Phishing: Spearphishing via Service
-
-  TA0005 Defense Evasion
-    T1027      Obfuscated Files or Information
-    T1036      Masquerading
-
-  TA0006 Credential Access
-    T1056.003  Input Capture: Web Portal Capture
-    T1598.003  Phishing for Information: Spearphishing Link
-
-  TA0040 Impact
-    T1657      Financial Theft
-
-  TA0043 Reconnaissance
-    T1593.001  Search Open Websites/Domains: Social Media
-    T1589.002  Gather Victim Identity Information: Email Addresses
-
-Common email-specific techniques to consider:
-  T1656      Impersonation -- sender or company misrepresented
-  T1204.001  User Execution: Malicious Link
-  T1204.002  User Execution: Malicious File
-  T1071.003  Application Layer Protocol: Mail Protocols (for C2 via email reply)
+Common email-specific techniques to consider (add rows as applicable):
+- T1656  Impersonation -- sender or company misrepresented
+- T1204.001  User Execution: Malicious Link
+- T1204.002  User Execution: Malicious File
+- T1071.003  Application Layer Protocol: Mail Protocols (for C2 via email reply)
 
 If no security findings rated MEDIUM or above:
   "No ATT&CK techniques mapped -- no significant security findings in this evaluation."
@@ -743,13 +841,6 @@ Each report stands independently -- this section adds context, not a shared verd
 | DNS resolution | OK | A/MX/TXT/NS records; N non-A responses filtered (SOA/PTR/CNAME -- no data lost) |
 | BiDi decode | OK / N/A | Manual span-by-span reversal |
 | Header analysis | OK | Received chain, authentication, sender identity |
-
-
-## Recommendation
-
-Plain English: do not reply / do not click / report as phishing / report to IC3.gov / etc.
-Immediate steps numbered list.
-Broader context if the recipient's details appear in fraud networks.
 
 
 ## Cleanup
@@ -820,6 +911,300 @@ Several external services used in email analysis have reliability or access issu
 **VirusTotal communicating_files / communicating_urls endpoints:** May return 403 on free tier. Note and skip -- the standard domain and IP analysis endpoints are sufficient.
 
 **Zero-detection on fresh URLs is expected:** A VT URL scan returning 0/95 detections on a URL from a newly-registered or newly-compromised domain does not mean the URL is safe. VT's detection coverage accumulates over days to weeks as URLs are reported. A clean VT result on a URL from a 3-day-old domain should be noted alongside the domain age finding, not treated as exoneration.
+
+---
+
+## Batch Email Analysis Mode (/canary eml <directory> or multiple .eml paths)
+
+If the user provides a directory of .eml files or multiple .eml paths at once, run email
+analysis on each file and produce a single combined batch report. This is distinct from
+`/canary inbox` (which downloads messages via OAuth) -- batch mode reads local .eml files
+the user has already exported.
+
+### Batch mode -- verdict rules
+
+1. The overall batch verdict is the highest-severity verdict across all emails in the batch.
+   Severity order (high to low): [X] Phishing > [X] Scam > [X] Malware Delivery > [!] Caution > [OK] Likely Legitimate > [?] Inconclusive
+2. State the overall verdict as: `[X] Phishing (1 of N emails)` -- include the count so the
+   reader knows the scope immediately.
+3. Per-email verdicts in the inventory table use the same spec verdicts as single-email reports.
+   Do NOT invent sub-verdicts or display variants. Use `[!] Caution` for spam that impersonates
+   a brand, unsolicited commercial email, and anything with notable flags but no confirmed harm.
+
+### Batch mode -- report format
+
+```
+# Canary Batch Email Report: <slug>
+
+Date: <date>
+Target: <directory path> (<N> emails)
+Evaluation: Batch email analysis
+Tool: Canary v2.8
+
+
+## Reading This Report
+
+| Verdict | Meaning | What to do |
+|---|---|---|
+| [OK] Likely Legitimate | No significant threat indicators found. | No action required. |
+| [!] Caution | Issues found, no proof of intentional harm. | Read findings before acting. |
+| [X] Phishing | Deliberate attempt to steal credentials or data via links or attachments. | Do not click anything. Report and delete. |
+| [X] Scam | Deliberate attempt to defraud you directly. | Do not reply. Do not provide any information. |
+| [X] Malware Delivery | Email contains or links to malware. | Do not open attachments or click links. |
+| [?] Inconclusive | Mixed or insufficient signals. | Read findings. Treat with caution. |
+
+| Severity | Meaning |
+|---|---|
+| CRITICAL | Confirmed threat. Do not proceed. |
+| HIGH | Strong indicator. Changes the overall verdict. |
+| MEDIUM | Supporting evidence. Consistent with the verdict. |
+| LOW | Minor signal. Low weight on its own. |
+| INFO | Informational. Context only. |
+
+
+## Verdict: <highest-severity verdict> (<count> of <N> emails)
+
+One or two plain-English sentences: what the most dangerous email in the batch is
+trying to do, and the overall threat profile of the batch.
+
+
+## Executive Summary
+
+One paragraph covering the batch as a whole: how many malicious, how many legitimate,
+what the primary threat type is, and the key evidence.
+
+| Verdict | Count |
+|---------|-------|
+| [X] Phishing | N |
+| [X] Scam | N |
+| [X] Malware Delivery | N |
+| [!] Caution | N |
+| [OK] Likely Legitimate | N |
+| [?] Inconclusive | N |
+| Total | N |
+
+| Severity | Finding Count |
+|----------|---------------|
+| Critical | N |
+| High | N |
+| Medium | N |
+| Low | N |
+| Info | N |
+
+
+## Email Inventory
+
+Quick-reference table for all emails in the batch. Sending IP is the outermost
+non-trusted IP in the Received chain. Domain Age is from VT creation_date; "<7d"
+flags CRITICAL. Key Artifact is the single most actionable IOC per email.
+
+| # | Subject (truncated) | Sending IP | ASN / Provider | Domain Age | Auth | Verdict | Key Artifact |
+|---|---------------------|------------|----------------|------------|------|---------|--------------|
+| 1 | ... | x.x.x.x | ASN / Provider | Xd / <7d CRITICAL | SPF/DKIM/DMARC pass | [OK] Likely Legitimate | -- |
+| 2 | ... | x.x.x.x | ASN / Provider | 2d CRITICAL | pass | [X] Phishing | drive.google.com/file/d/<ID> |
+...
+
+
+## Findings Summary
+
+| # | Severity | Domain | Category | What was found | Artifacts |
+|---|----------|--------|----------|----------------|-----------|
+| 1 | CRITICAL | Integrity | Phishing | Short title | reply-to domain, drive file ID |
+| 2 | HIGH | Integrity | Obfuscation | Short title | Unicode char U+2066, domain |
+...
+
+
+## Findings
+
+### N. <Short title> (Email #N)
+
+| Field | Value |
+|-------|-------|
+| Severity | CRITICAL / HIGH / MEDIUM / LOW / INFO |
+| Domain | Confidentiality / Integrity / Availability |
+| Category | Phishing / Fraud / Obfuscation / Infrastructure / Impersonation |
+| Email # | N -- <subject> |
+| Sending IP | x.x.x.x (ASN, Provider) |
+| Domain Age | Xd (created YYYY-MM-DD) |
+| Auth | SPF pass / DKIM pass / DMARC pass |
+| Artifacts | domain: example.com; email: foo@bar.com; url: https://...; file_id: abc123; phone: +1-... |
+| MITRE | T1XXX.XXX - Tactic: Technique |
+
+Plain-English explanation of what this means for the recipient.
+
+**Fix:**
+  - Specific action.
+
+**Countermeasure:** Systemic control. (D3FEND: D3-XXX)
+
+
+## Campaign Analysis
+
+Group emails by shared infrastructure. Label each cluster with the shared indicator
+that defines it. Tie cluster membership back to email numbers from the inventory table.
+Every cluster block ends with an IOC block for copy-paste use.
+
+### Cluster 1: <defining indicator> (<N> emails: #X, #Y, #Z)
+
+What they share: <relay IP / tracking token / template / image IDs / HELO pattern>
+Brands impersonated: <list>
+Infrastructure: IP x.x.x.x, ASN N, Provider, Hosting country
+Sending method: <residential botnet / VPS / shared relay>
+
+**IOCs -- Cluster 1:**
+```
+# Domains
+domain1.com
+domain2.com
+
+# IPs
+x.x.x.x
+
+# Emails
+foo@domain1.com
+
+# Tracking token
+<token string>
+
+# Abuse contact
+abuse@<hosting-provider>.com
+```
+
+### Unclustered Emails
+
+Emails #X, #Y -- no shared infrastructure with others in this batch.
+
+| # | Subject | Verdict | Key indicator |
+|---|---------|---------|---------------|
+...
+
+
+## Recommendations
+
+Ranked by highest defensive value. Recipient actions first, then mail admin actions.
+
+| Priority | Audience | Action | Why |
+|----------|----------|--------|-----|
+| 1 -- CRITICAL | Recipient | <immediate action> | <plain-English reason> |
+...
+
+
+## MITRE ATT&CK
+
+Techniques mapped from findings in this evaluation.
+Full descriptions: https://attack.mitre.org
+
+MITRE ATT&CK(R) is a registered trademark of The MITRE Corporation and is used in
+accordance with the MITRE ATT&CK Terms of Use. Technique mappings in this report
+reference the MITRE ATT&CK knowledge base, published under CC BY 4.0.
+https://attack.mitre.org/resources/terms-of-use/
+
+| Tactic | ID | Technique | Observed |
+|--------|----|-----------|----------|
+| TA0001 Initial Access | T1566.003 | Phishing: Spearphishing via Service | ... |
+...
+
+If no findings rated MEDIUM or above: "No ATT&CK techniques mapped."
+
+
+## Researcher Pivot Guide
+
+For security researchers and analysts investigating this batch. All IOCs consolidated
+for copy-paste use and cross-reference with external threat intelligence platforms.
+
+### Pivot Recommendations
+
+Ranked table. Full artifact values are in the IOC blocks below.
+
+| # | Action | Expected outcome |
+|---|--------|-----------------|
+| 1 | <highest-value action> | <what it achieves> |
+...
+
+
+### Per-Email Technical Data
+
+Sending IP is the outermost non-trusted Received hop. Domain Age from VirusTotal creation_date.
+Key Artifact is the single most actionable IOC per email.
+
+| # | Subject (truncated) | Sending IP | ASN / Provider | Domain Age | Auth | Verdict | Key Artifact |
+|---|---------------------|------------|----------------|------------|------|---------|--------------|
+...
+
+
+### All Domains
+
+```
+<one domain per line, attacker-controlled only>
+```
+
+### All IPs
+
+```
+<one IP per line -- sending IPs + any hardcoded IPs in body>
+```
+
+### All Email Addresses (non-legitimate)
+
+```
+<reply-to, attacker-controlled from addresses, etc.>
+```
+
+### All URLs / File IDs
+
+```
+<one per line>
+```
+
+### All Tracking Tokens / Shared Identifiers
+
+```
+<base64 tokens, image IDs, template fingerprints>
+```
+
+
+## Tool Coverage
+
+| Tool | Result | Notes |
+|------|--------|-------|
+| VirusTotal URL scan | OK / SKIP | N URLs, N detections |
+| VirusTotal domain API | OK / SKIP | Domain creation dates, N domains |
+| VirusTotal IP API | OK / SKIP | N IPs |
+| DNSBL | OK / SKIP | N IPs checked |
+| Shodan InternetDB | OK / SKIP | N IPs |
+| Header analysis | OK | N emails |
+
+
+## Cleanup
+
+| Item | Status |
+|------|--------|
+| Source .eml files | Read-only analysis -- files untouched at <path> |
+| Check scripts | Deleted / None created |
+| State file | Deleted |
+
+
+## Token Usage
+
+| Metric | Value |
+|--------|-------|
+| Input tokens | N |
+| Output tokens | N |
+| Cache read tokens | N (X% of input served from cache) |
+| Cache write tokens | N |
+| Estimated cost | ~$N (Sonnet 4.6 pricing) |
+| Batch size | N emails |
+
+
+---
+Canary v2.8  use at your own risk. This tool reduces risk but does not guarantee safety.
+No security evaluation is a substitute for your own judgment.
+https://github.com/AppDevOnly/canary
+
+This report references the MITRE ATT&CK(R) knowledge base. MITRE ATT&CK(R) is a
+registered trademark of The MITRE Corporation, used under CC BY 4.0.
+https://attack.mitre.org
+```
 
 ---
 
@@ -1262,6 +1647,31 @@ If a state file exists, read it and tell the user:
 > "I found a partial [level] scan of [target] from [date]. Here's what's already complete: [list phases done]. Want to resume from where we left off, or start fresh?"
 
 - **Resume**  load existing findings from state file, skip completed phases, continue from next incomplete phase. **First check `cleanup_complete` in the state file**  if it is `false` and Phase 4 is in `phases_complete`, run the Phase 5 cleanup block before anything else (a previous scan may have left target files on the host).
+
+  After loading the state, check whether the current session file matches `session_file` in the state. A mismatch means the scan crossed a context window boundary:
+  ```powershell
+  $currentFile = Get-ChildItem "$env:USERPROFILE\.claude\projects\" -Recurse -Filter '*.jsonl' |
+      Where-Object { $_.Name -notmatch '^agent-' } |
+      Sort-Object LastWriteTime -Descending |
+      Select-Object -First 1 -ExpandProperty FullName
+
+  if ($state.session_file -and $currentFile -ne $state.session_file) {
+      # Session rolled over -- archive the old session window, start a new one
+      $priorSession = @{
+          file       = $state.session_file
+          start_time = $state.session_start_time
+          end_time   = (Get-Date -Format 'o')   # approximate -- last message in old file
+      }
+      if (-not $state.prior_sessions) { $state | Add-Member -NotePropertyName prior_sessions -NotePropertyValue @() -Force }
+      $state.prior_sessions += $priorSession
+      $state.session_file        = $currentFile
+      $state.session_start_time  = (Get-Date -Format 'o')
+      $state.session_end_time    = $null
+      $state | ConvertTo-Json -Depth 5 | Out-File "$env:USERPROFILE\canary-reports\$targetSlug-state.json" -Encoding UTF8 -Force
+      Write-Host "Session rollover detected -- prior session archived, token tracking continues."
+  }
+  ```
+
 - **Fresh**  delete state file, start over from Phase 1
 
 If no state file exists, proceed normally.
@@ -1971,13 +2381,15 @@ $sessionStartTime = Get-Date -Format 'o'   # ISO 8601 -- token window starts her
   "sac_original_state": null,
   "cleanup_complete": false,
   "session_start_time": "<ISO timestamp from $sessionStartTime>",
-  "session_end_time": null
+  "session_end_time": null,
+  "session_file": "<absolute path to current .jsonl>",
+  "prior_sessions": []
 }
 ```
 
 Write the state file using the Write tool (not PowerShell -Command): write the JSON content directly to `C:\Users\<user>\canary-reports\<target-slug>-state.json` using absolute paths only -- never $HOME or ~ in file paths passed to PowerShell via bash, as variable expansion is unreliable across shells. Use [System.IO.File]::WriteAllText() if writing from PowerShell script, or the Write tool if writing from Claude directly.
 
-Update this file after each phase completes by adding the phase name to `phases_complete`. `session_end_time` is set in Phase 5 immediately before token calculation -- it is the token window end. This is how resume works after a restart and how per-scan token cost is isolated from surrounding session activity.
+Update this file after each phase completes by adding the phase name to `phases_complete`. `session_end_time` is set in Phase 5 immediately before token calculation. `session_file` is the absolute path to the current Claude session JSONL file -- recorded at consent so Phase 5 knows exactly which file to count from. If the scan crosses a context window boundary (rollover), the Phase 0 resume check detects the file change and moves the old window into `prior_sessions` before starting a new one. Phase 5 sums across all windows to produce an accurate cross-session token count.
 
 ---
 
@@ -3047,8 +3459,14 @@ Apply the FIRST matching rule from top to bottom:
 Never use [!] Caution for something that is clearly [X] Unsafe. An exploit collection
 is not "use with caution" -- it is unsafe. The verdict must match the actual risk level.
 
+The verdict is determined by the evidence, not by prior expectations about the target.
+Do not select a verdict before reading the code. Do not allow the repo's reputation,
+star count, or apparent legitimacy to pull the verdict toward [OK] Safe when findings
+warrant higher. Do not allow the fact that a target was chosen for testing to influence
+the verdict in any direction. Read, find, rate, then conclude -- in that order.
+
 ```
-# Canary Security Report: <target>
+# Canary Security Report: <target> -- <verdict>
 
 Date: <date>
 Target: <url or path>
@@ -3058,7 +3476,7 @@ Tool: Canary v2.8
 
 ## Reading This Report
 
-| Verdict | Meaning | What to do |
+| Report Verdict | Meaning | What to do |
 |---|---|---|
 | [OK] Safe | No significant issues found. | Safe for normal use. |
 | [!] Caution | Issues found, no proof of intentional harm. | Read findings before using. |
@@ -3066,7 +3484,7 @@ Tool: Canary v2.8
 | [X] Unsafe - Dangerous by Design | Software's purpose is inherently dangerous (exploit kit, C2 framework, RAT, keylogger). | Do not install without understanding the implications. |
 | [?] Researcher Mode | Offensive tool scanned at user's request. | No safety verdict issued. |
 
-| Severity | Meaning |
+| Findings Severity | Meaning |
 |---|---|
 | CRITICAL | Immediate threat. Do not proceed until resolved. |
 | HIGH | Serious risk with direct security or reliability impact. |
@@ -3117,14 +3535,15 @@ Recommendation: One sentence. What should the user do?
 
 Quick reference -- see the Findings section below for full detail on each item.
 
-| # | Severity | Security Domain | Category | What was found |
-|---|----------|-----------------|----------|----------------|
-| 1 | CRITICAL | Integrity | Security | Short title matching Finding 1 |
-| 2 | HIGH | Confidentiality | Secrets | Short title matching Finding 2 |
-| 3 | MEDIUM | Availability | License | Short title matching Finding 3 |
+| # | Severity | Domain | Category | Artifacts | What was found |
+|---|----------|--------|----------|-----------|----------------|
+| 1 | CRITICAL | Integrity | Security | path/to/file.py:42 | Short title matching Finding 1 |
+| 2 | HIGH | Confidentiality | Secrets | docker-compose.yml | Short title matching Finding 2 |
+| 3 | MEDIUM | Availability | License | package.json | Short title matching Finding 3 |
 
 (Include every finding. Use the same numbering as the Findings section.
-Security Domain: Confidentiality / Integrity / Availability -- pick the primary one.
+Domain: Confidentiality / Integrity / Availability -- pick the primary one.
+Artifacts: the key file, path, or identifier from the finding. Use "--" if not applicable.
 If no findings: replace the table with "No issues found.")
 
 
@@ -3154,26 +3573,6 @@ One plain-English sentence leading with impact: what does this mean for the pers
 (Repeat for each finding. If no findings: "No issues found.")
 
 
-## VirusTotal
-
-Include this section only if VT_API_KEY was set during the scan. If not configured, write:
-"Not evaluated  set VT_API_KEY to enable binary hash checks against 70+ AV engines."
-
-If configured, report results for each binary scanned:
-  Binary: <filename>
-  Engines checked: <N total = malicious + suspicious + harmless + undetected>
-  Detections: Clean (0 malicious, 0 suspicious)  -- or --  [N] malicious, [N] suspicious
-
-If the download URL was scanned (Full mode):
-  Download URL: <url (truncated if long)>
-  Engines checked: <N total>
-  Detections: Clean  -- or --  [N] malicious, [N] suspicious
-
-Use the same total engine count everywhere in the report (Executive Summary, VT section, etc.). Never mix the total with the harmless-only subset.
-
-If binaries were present but the cap of 10 was hit, note how many were scanned vs total.
-
-
 ## Security Analysis
 
 Based on static code review only. Full mode required to observe actual runtime behavior.
@@ -3184,6 +3583,31 @@ Based on static code review only. Full mode required to observe actual runtime b
 | Credentials | One line summary. |
 | Persistence | One line summary. |
 | Process behavior | One line summary. |
+
+
+## Network Indicators
+
+_(Include this section when verdict is [!] Caution or [X] Unsafe and the code is written to contact external hosts.
+Omit for [OK] Safe verdicts or when no network activity was identified.
+This section is for defenders who need copy-paste IOCs for firewall rules, SIEM detection, or threat intel sharing.)_
+
+```
+# Domains (observed in source code)
+example-api.com
+another-host.net
+
+# IPs (hardcoded or resolved from above)
+1.2.3.4
+
+# Ports
+443 (HTTPS API)
+8080 (alt HTTP)
+
+# Protocols
+HTTPS to external AI APIs
+```
+
+Note any indicators that are expected/benign (e.g. "openai.com -- expected, documented API endpoint") vs any that are suspicious or undocumented.
 
 
 ## Dependency Audit
@@ -3246,8 +3670,39 @@ Before you use it:
 Optional:
   - Nice-to-have improvement
 
-If the repo has unverified binaries, high-severity findings, or any sandbox-worthy behavior (even if verdict is  Caution), include:
-  - "To observe what this software actually does at runtime, run `/canary <target> full`  this runs it inside Windows Sandbox with network and process monitoring."
+If the repo has unverified binaries, high-severity findings, or any sandbox-worthy behavior (even if verdict is [!] Caution), include:
+  - "To observe what this software actually does at runtime, run `/canary <target> full` -- this runs it inside Windows Sandbox with network and process monitoring."
+
+If verdict is [!] Caution or [X] Unsafe and network indicators or supply chain findings exist, add a
+Pivot Recommendations block (2-4 bullets) with actionable next steps for a security researcher or defender:
+
+**Pivot Recommendations:**
+- Suggested investigation leads, e.g. "Review commit history for when <suspicious dep> was added"
+- Defender-oriented leads, e.g. "Add <domain> to outbound firewall block list"
+- Threat intel leads, e.g. "Search VirusTotal passive DNS for x.x.x.x for related infrastructure"
+- Supply chain leads, e.g. "Run `/canary <suspicious-dep> quick` to evaluate the dependency directly"
+
+Omit this block entirely for [OK] Safe verdicts.
+
+
+## VirusTotal
+
+Include this section only if VT_API_KEY was set during the scan. If not configured, write:
+"Not evaluated  set VT_API_KEY to enable binary hash checks against 70+ AV engines."
+
+If configured, report results for each binary scanned:
+  Binary: <filename>
+  Engines checked: <N total = malicious + suspicious + harmless + undetected>
+  Detections: Clean (0 malicious, 0 suspicious)  -- or --  [N] malicious, [N] suspicious
+
+If the download URL was scanned (Full mode):
+  Download URL: <url (truncated if long)>
+  Engines checked: <N total>
+  Detections: Clean  -- or --  [N] malicious, [N] suspicious
+
+Use the same total engine count everywhere in the report (Executive Summary, VT section, etc.). Never mix the total with the harmless-only subset.
+
+If binaries were present but the cap of 10 was hit, note how many were scanned vs total.
 
 
 ## Tool Coverage
@@ -3282,64 +3737,83 @@ Only mark an item as Deleted if the deletion command actually confirmed success.
 
 ## Token Usage
 
-**Token counting uses a timestamp window** -- only messages between `session_start_time` (recorded at consent) and `session_end_time` (set here, right before calculation) are counted. This isolates cost to this scan regardless of other activity in the session or prior scans.
+**Token counting uses timestamp windows across all sessions.** A scan that crosses a context window boundary produces multiple session files. Each is tracked separately in the state file (`session_file` for the current session, `prior_sessions` for rolled-over ones) and summed at report time.
 
-Right before calculating tokens, record the end time and save it to the state file:
+Right before calculating tokens, close out the current session window and save:
 ```powershell
-$state = Get-Content "$HOME\canary-reports\$targetSlug-state.json" | ConvertFrom-Json
+$state = Get-Content "$env:USERPROFILE\canary-reports\$targetSlug-state.json" | ConvertFrom-Json
 $state.session_end_time = (Get-Date -Format 'o')
-$state | ConvertTo-Json | Out-File "$HOME\canary-reports\$targetSlug-state.json" -Encoding UTF8 -Force
+$state | ConvertTo-Json -Depth 5 | Out-File "$env:USERPROFILE\canary-reports\$targetSlug-state.json" -Encoding UTF8 -Force
 ```
 
-Then calculate tokens for this scan only:
+Then calculate tokens across all sessions:
 ```powershell
-$sessionFile = Get-ChildItem "$env:USERPROFILE\.claude\projects\" -Recurse -Filter '*.jsonl' |
-    Where-Object { $_.Name -notmatch '^agent-' } |
-    Sort-Object LastWriteTime -Descending |
-    Select-Object -First 1 -ExpandProperty FullName
-
-$startTime = [datetime]$state.session_start_time
-$endTime   = [datetime]$state.session_end_time
-
-$input = 0; $output = 0; $cacheRead = 0; $cacheCreate = 0; $timestampFound = $false
-Get-Content $sessionFile | ForEach-Object {
-    try {
-        $j = $_ | ConvertFrom-Json -ErrorAction Stop
-        if ($j.timestamp) { $timestampFound = $true }
-        if ($j.message.usage -and $j.timestamp) {
-            $msgTime = [datetime]$j.timestamp
-            if ($msgTime -ge $startTime -and $msgTime -le $endTime) {
-                $u = $j.message.usage
-                $input      += if ($u.input_tokens)              { $u.input_tokens }              else { 0 }
-                $output     += if ($u.output_tokens)             { $u.output_tokens }             else { 0 }
-                $cacheRead  += if ($u.cache_read_input_tokens)   { $u.cache_read_input_tokens }   else { 0 }
-                $cacheCreate+= if ($u.cache_creation_input_tokens){ $u.cache_creation_input_tokens} else { 0 }
-            }
-        }
-    } catch {}
-}
-
-if (-not $timestampFound) {
-    Write-Host "WARN: No timestamp field in session JSONL -- token count may be inaccurate (counting full session)"
-    # Fallback: recount without time filter
-    Get-Content $sessionFile | ForEach-Object {
-        try {
-            $j = $_ | ConvertFrom-Json -ErrorAction Stop
-            if ($j.message.usage) {
-                $u = $j.message.usage
-                $input      += if ($u.input_tokens)              { $u.input_tokens }              else { 0 }
-                $output     += if ($u.output_tokens)             { $u.output_tokens }             else { 0 }
-                $cacheRead  += if ($u.cache_read_input_tokens)   { $u.cache_read_input_tokens }   else { 0 }
-                $cacheCreate+= if ($u.cache_creation_input_tokens){ $u.cache_creation_input_tokens} else { 0 }
-            }
-        } catch {}
+# Build the full list of sessions to count: prior (rolled-over) + current
+$sessions = [System.Collections.Generic.List[object]]::new()
+if ($state.prior_sessions) {
+    foreach ($ps in $state.prior_sessions) {
+        $sessions.Add(@{ file=$ps.file; start=[datetime]$ps.start_time; end=[datetime]$ps.end_time })
     }
 }
+$sessions.Add(@{ file=$state.session_file; start=[datetime]$state.session_start_time; end=[datetime]$state.session_end_time })
+
+function Count-Tokens($sessions) {
+    # NOTE: $input is a reserved PowerShell pipeline variable -- always use $inTok, never $input
+    $inTok = 0; $output = 0; $cacheRead = 0; $cacheCreate = 0; $timestampFound = $false
+    foreach ($sess in $sessions) {
+        if (-not (Test-Path $sess.file)) {
+            Write-Host "WARN: session file not found: $($sess.file) -- tokens from this window not counted"
+            continue
+        }
+        Get-Content $sess.file | ForEach-Object {
+            try {
+                $j = $_ | ConvertFrom-Json -ErrorAction Stop
+                if ($j.timestamp) { $timestampFound = $true }
+                if ($j.message.usage -and $j.timestamp) {
+                    $msgTime = [datetime]$j.timestamp
+                    if ($msgTime -ge $sess.start -and $msgTime -le $sess.end) {
+                        $u = $j.message.usage
+                        $inTok       += if ($u.input_tokens)               { $u.input_tokens }               else { 0 }
+                        $output      += if ($u.output_tokens)              { $u.output_tokens }              else { 0 }
+                        $cacheRead   += if ($u.cache_read_input_tokens)    { $u.cache_read_input_tokens }    else { 0 }
+                        $cacheCreate += if ($u.cache_creation_input_tokens){ $u.cache_creation_input_tokens} else { 0 }
+                    }
+                }
+            } catch {}
+        }
+    }
+    if (-not $timestampFound) {
+        Write-Host "WARN: No timestamp field found -- falling back to full-file count (may overcount)"
+        $inTok = 0; $output = 0; $cacheRead = 0; $cacheCreate = 0
+        foreach ($sess in $sessions) {
+            if (-not (Test-Path $sess.file)) { continue }
+            Get-Content $sess.file | ForEach-Object {
+                try {
+                    $j = $_ | ConvertFrom-Json -ErrorAction Stop
+                    if ($j.message.usage) {
+                        $u = $j.message.usage
+                        $inTok       += if ($u.input_tokens)               { $u.input_tokens }               else { 0 }
+                        $output      += if ($u.output_tokens)              { $u.output_tokens }              else { 0 }
+                        $cacheRead   += if ($u.cache_read_input_tokens)    { $u.cache_read_input_tokens }    else { 0 }
+                        $cacheCreate += if ($u.cache_creation_input_tokens){ $u.cache_creation_input_tokens} else { 0 }
+                    }
+                } catch {}
+            }
+        }
+    }
+    return @{ inTok=$inTok; output=$output; cacheRead=$cacheRead; cacheCreate=$cacheCreate }
+}
+
+$tokens = Count-Tokens $sessions
+$inTok=$tokens.inTok; $output=$tokens.output; $cacheRead=$tokens.cacheRead; $cacheCreate=$tokens.cacheCreate
 
 # Sonnet 4.6 pricing: $3/M input, $15/M output, $0.30/M cache read, $3.75/M cache write
-$cost = ($input / 1e6 * 3) + ($output / 1e6 * 15) + ($cacheRead / 1e6 * 0.30) + ($cacheCreate / 1e6 * 3.75)
-Write-Host "input=$input output=$output cache_read=$cacheRead cache_create=$cacheCreate cost=$([math]::Round($cost,4))"
+$cost = ($inTok / 1e6 * 3) + ($output / 1e6 * 15) + ($cacheRead / 1e6 * 0.30) + ($cacheCreate / 1e6 * 3.75)
+$sessionCount = $sessions.Count
+Write-Host "sessions=$sessionCount input=$inTok output=$output cache_read=$cacheRead cache_create=$cacheCreate cost=$([math]::Round($cost,4))"
 ```
+
+If `session_count > 1`, note in the Token Usage table: "N sessions (context window rollover)" next to the session count. This is normal for large or long-running scans.
 
 Write the section using the values above.
 
@@ -3383,30 +3857,63 @@ After writing the .md report, generate an HTML version alongside it.
 Convert the .md report to a self-contained HTML file using inline styles -- no external CSS, no
 JavaScript framework, no converter tool. Generate the HTML directly from the report content.
 
+IMPORTANT: Always use the write-then-execute pattern. Write the script to a .ps1 file first,
+then run it. Never inline this script in a bash -Command string -- bash mangles backticks
+(treating them as command substitutions), dollar signs, and regex special characters, producing
+broken output (literal $1 in place of capture groups, missing code block conversion, etc.).
+
 ```powershell
-$mdPath   = "$HOME\canary-reports\$targetSlug-$(Get-Date -Format 'yyyyMMdd')-canary-report.md"
+# Write the HTML generation script to a temp file, then execute it
+$htmlScript = "$scanTempDir\generate-html.ps1"
+@'
+$mdPath   = "$env:USERPROFILE\canary-reports\TARGET_SLUG-DATE-canary-report.md"
 $htmlPath = $mdPath -replace '\.md$', '.html'
 $md = Get-Content $mdPath -Raw
 
-# Map verdict to color
-$verdictColor = switch -Wildcard ($md) {
-    '*[OK] Safe*'               { '#1a7f37'; break }
-    '*[!] Caution*'             { '#9a6700'; break }
-    '*[X] Unsafe*'              { '#cf222e'; break }
-    default                     { '#57606a' }
-}
-$verdictText = if ($md -match '\[OK\] Safe')      { '[OK] Safe' }
-               elseif ($md -match '\[!\] Caution') { '[!] Caution' }
-               elseif ($md -match '\[X\] Unsafe')  { '[X] Unsafe' }
-               else                                { 'Unknown' }
-$target = $md -replace '(?s).*?Target:\s*([^\r\n]+).*', '$1'
 
-# Convert markdown to basic HTML (tables, headings, code, bold, inline code)
-function ConvertTo-Html ([string]$text) {
+# Extract verdict text from the Verdict heading line first, then derive color from it.
+# Do NOT match [X]/[!]/[OK] against the full document -- the Reading This Report table
+# contains all three symbols and will always trigger the first match regardless of verdict.
+$verdictText = if ($md -match 'Verdict: (\[.+?\][^\r\n]+)') { $Matches[1].Trim() } else { 'Unknown' }
+# Verdict color family: deep authoritative palette, intentionally distinct from findings severity alert colors
+# Severity uses bright alert colors (CRITICAL=#cf222e, HIGH=#e36209, MEDIUM=#9a6700, INFO=#0969da)
+# Verdict uses deep judgment colors in the same hue families but richer and darker
+$verdictColor = if     ($verdictText -match '^\[X\]')  { '#8b0000' }   # deep crimson (vs CRITICAL bright red)
+                elseif ($verdictText -match '^\[!\]')  { '#7c5200' }   # deep amber-brown (vs MEDIUM bright amber)
+                elseif ($verdictText -match '^\[OK\]') { '#1a5c35' }   # forest green (not in severity palette)
+                elseif ($verdictText -match '^\[\?\]') { '#1e3a5f' }   # deep navy (vs INFO bright blue)
+                else                                   { '#374151' }   # charcoal
+$targetSlug = 'TARGET_SLUG'
+
+function ConvertTo-HtmlBody ([string]$text) {
     # Escape HTML entities first
     $text = $text -replace '&','&amp;' -replace '<','&lt;' -replace '>','&gt;'
 
-    # Tables: | col | col |
+    # Join continuation lines (2+ space indent following a bullet) onto their parent item
+    # Handles multi-line bullets that would otherwise produce orphaned text outside <li>
+    do {
+        $prev = $text
+        $text = [regex]::Replace($text, '(?m)(^- .+)\r?\n[ \t]{2,}(\S.*)', '$1 $2')
+    } while ($text -ne $prev)
+
+    # Extract code blocks into placeholders BEFORE any other conversion.
+    # Prevents heading regex (^# -> <h1>) and paragraph regex (\n\n -> </p><p>)
+    # from corrupting code block content.
+    $blocks = @{}
+    $blockIdx = 0
+    while ($text -match '(?s)```[a-zA-Z]*\r?\n(.*?)```') {
+        $key = "XCODEBLOCKX${blockIdx}X"
+        $blocks[$key] = $Matches[1]
+        $text = $text.Replace($Matches[0], $key)
+        $blockIdx++
+    }
+
+    # Headings -- must run before paragraph conversion to avoid <p><h2> nesting
+    $text = [regex]::Replace($text, '(?m)^### (.+)$', '<h3>$1</h3>')
+    $text = [regex]::Replace($text, '(?m)^## (.+)$',  '<h2>$1</h2>')
+    $text = [regex]::Replace($text, '(?m)^# (.+)$',   '<h1>$1</h1>')
+
+    # Tables
     $text = [regex]::Replace($text, '(?m)^(\|[^\r\n]+\|)\r?\n', {
         param($m)
         $row = $m.Value.Trim()
@@ -3415,16 +3922,14 @@ function ConvertTo-Html ([string]$text) {
         $tds = ($cells | ForEach-Object { "<td>$($_.Trim())</td>" }) -join ''
         "<tr>$tds</tr>`n"
     })
-    # Wrap consecutive <tr> blocks in <table>
     $text = [regex]::Replace($text, '(?s)(<tr>.*?</tr>\n)+', { "<table>$($args[0].Value)</table>`n" })
 
-    # Headings
-    $text = [regex]::Replace($text, '(?m)^### (.+)$', '<h3>$1</h3>')
-    $text = [regex]::Replace($text, '(?m)^## (.+)$',  '<h2>$1</h2>')
-    $text = [regex]::Replace($text, '(?m)^# (.+)$',   '<h1>$1</h1>')
-
-    # Code blocks
-    $text = [regex]::Replace($text, '(?s)```[a-z]*\r?\n(.*?)```', '<pre><code>$1</code></pre>')
+    # Promote first row of each table to header row (td -> th)
+    $text = [regex]::Replace($text, '(?s)(<table><tr>)(.*?)(</tr>)', {
+        param($m)
+        $inner = $m.Groups[2].Value -replace '<td>','<th>' -replace '</td>','</th>'
+        "$($m.Groups[1].Value)$inner$($m.Groups[3].Value)"
+    })
 
     # Bold
     $text = [regex]::Replace($text, '\*\*(.+?)\*\*', '<strong>$1</strong>')
@@ -3435,21 +3940,64 @@ function ConvertTo-Html ([string]$text) {
     # Horizontal rules
     $text = $text -replace '(?m)^---$', '<hr>'
 
+    # List items (unordered)
+    $text = [regex]::Replace($text, '(?m)^- (.+)$', '<li>$1</li>')
+    $text = [regex]::Replace($text, '(?m)^\d+\. (.+)$', '<li>$1</li>')
+    $text = [regex]::Replace($text, '(?s)(<li>.*?</li>\n)+', { "<ul>$($args[0].Value)</ul>`n" })
+
     # Paragraphs: blank lines -> paragraph breaks
     $text = [regex]::Replace($text, '\r?\n\r?\n', '</p><p>')
     $text = "<p>$text</p>"
 
+    # Strip invalid <p> wrappers around block elements
+    $text = $text -replace '<p>(<h[1-3]>)', '$1'
+    $text = $text -replace '(<\/h[1-3]>)</p>', '$1'
+    $text = $text -replace '<p>(<table>)', '$1'
+    $text = $text -replace '(<\/table>)</p>', '$1'
+    $text = $text -replace '<p>(<ul>)', '$1'
+    $text = $text -replace '(<\/ul>)</p>', '$1'
+    $text = $text -replace '<p>(<ol>)', '$1'
+    $text = $text -replace '(<\/ol>)</p>', '$1'
+    $text = $text -replace '<p>(<pre>)', '$1'
+    $text = $text -replace '(<\/pre>)</p>', '$1'
+    $text = $text -replace '<p>(<hr>)', '$1'
+    $text = $text -replace '(<hr>)</p>', '$1'
+
+    # Substitute code blocks back
+    foreach ($key in $blocks.Keys) {
+        $content = $blocks[$key]
+        $text = $text.Replace($key, "<pre><code>$content</code></pre>")
+    }
+
     return $text
 }
 
-$body = ConvertTo-Html $md
+$body = ConvertTo-HtmlBody $md
 
-# Severity badge colors
-$body = $body -replace 'CRITICAL', '<span style="background:#cf222e;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.85em">CRITICAL</span>'
-$body = $body -replace '\bHIGH\b', '<span style="background:#e36209;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.85em">HIGH</span>'
-$body = $body -replace '\bMEDIUM\b', '<span style="background:#9a6700;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.85em">MEDIUM</span>'
-$body = $body -replace '\bLOW\b', '<span style="background:#57606a;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.85em">LOW</span>'
-$body = $body -replace '\bINFO\b', '<span style="background:#0969da;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.85em">INFO</span>'
+# Findings severity badges (bright alert palette)
+$body = [regex]::Replace($body, '(<td>)(CRITICAL)(<\/td>)', '$1<span style="background:#cf222e;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.85em">CRITICAL</span>$3')
+$body = [regex]::Replace($body, '(<td>)(HIGH)(<\/td>)',     '$1<span style="background:#e36209;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.85em">HIGH</span>$3')
+$body = [regex]::Replace($body, '(<td>)(MEDIUM)(<\/td>)',   '$1<span style="background:#9a6700;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.85em">MEDIUM</span>$3')
+$body = [regex]::Replace($body, '(<td>)(LOW)(<\/td>)',      '$1<span style="background:#57606a;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.85em">LOW</span>$3')
+$body = [regex]::Replace($body, '(<td>)(INFO)(<\/td>)',     '$1<span style="background:#0969da;color:#fff;padding:1px 6px;border-radius:3px;font-size:0.85em">INFO</span>$3')
+
+# Report verdict badges in Reading This Report table (deep judgment palette)
+$vb = 'color:#fff;padding:2px 8px;border-radius:3px;font-size:0.85em;font-weight:600;white-space:nowrap'
+$body = [regex]::Replace($body, '(<td>)(\[OK\] Safe)(<\/td>)',                        '$1<span style="background:#1a5c35;' + $vb + '">[OK] Safe</span>$3')
+$body = [regex]::Replace($body, '(<td>)(\[!\] Caution)(<\/td>)',                      '$1<span style="background:#7c5200;' + $vb + '">[!] Caution</span>$3')
+$body = [regex]::Replace($body, '(<td>)(\[X\] Unsafe - Hidden Threat)(<\/td>)',       '$1<span style="background:#8b0000;' + $vb + '">[X] Unsafe - Hidden Threat</span>$3')
+$body = [regex]::Replace($body, '(<td>)(\[X\] Unsafe - Dangerous by Design)(<\/td>)', '$1<span style="background:#8b0000;' + $vb + '">[X] Unsafe - Dangerous by Design</span>$3')
+$body = [regex]::Replace($body, '(<td>)(\[\?\] Researcher Mode)(<\/td>)',              '$1<span style="background:#1e3a5f;' + $vb + '">[?] Researcher Mode</span>$3')
+
+# Report title block -- entire h1 becomes the verdict-colored banner
+# Structured as: CANARY SECURITY REPORT label / Target: name / Verdict: bold text
+$body = [regex]::Replace($body,
+    '<h1>(Canary Security Report): (.+?) -- (.+?)</h1>',
+    '<h1 style="background:' + $verdictColor + ';color:#fff;padding:1.25rem 1.5rem;border-radius:6px;margin-bottom:1.5rem;line-height:1.6;border:none">' +
+    '<span style="font-size:1.5rem;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;display:block;margin-bottom:4px">Canary Security Report</span>' +
+    '<span style="font-size:0.9rem;font-weight:400;opacity:0.88;display:block">Target: &quot;$2&quot;</span>' +
+    '<span style="font-size:0.9rem;font-weight:700;display:block">Verdict: $3</span>' +
+    '</h1>')
 
 $html = @"
 <!DOCTYPE html>
@@ -3460,21 +4008,22 @@ $html = @"
 <title>Canary Report: $targetSlug</title>
 <style>
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; color: #24292f; line-height: 1.6; }
-  .verdict-banner { background: $verdictColor; color: #fff; padding: 1rem 1.5rem; border-radius: 6px; margin-bottom: 1.5rem; font-size: 1.25rem; font-weight: 600; }
-  h1 { border-bottom: 1px solid #d0d7de; padding-bottom: 0.5rem; }
+  h1 { padding-bottom: 0.5rem; }
   h2 { margin-top: 2rem; border-bottom: 1px solid #d0d7de; padding-bottom: 0.3rem; }
+  h3 { margin-top: 1.5rem; }
   table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
   td, th { border: 1px solid #d0d7de; padding: 0.4rem 0.75rem; text-align: left; }
+  th { background: #0a2a5e; color: #fff; font-weight: 600; }
   tr:nth-child(even) td { background: #f6f8fa; }
   pre { background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px; padding: 1rem; overflow-x: auto; }
   code { background: #f6f8fa; border-radius: 3px; padding: 0.1em 0.3em; font-size: 0.9em; }
   pre code { background: none; padding: 0; }
   hr { border: none; border-top: 1px solid #d0d7de; margin: 2rem 0; }
-  @media print { .verdict-banner { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+  ul, ol { padding-left: 1.5rem; }
+  li { margin: 0.2rem 0; }
 </style>
 </head>
 <body>
-<div class="verdict-banner">$verdictText -- $targetSlug</div>
 $body
 </body>
 </html>
@@ -3482,6 +4031,11 @@ $body
 
 $html | Out-File $htmlPath -Encoding UTF8 -Force
 Write-Host "HTML report: $htmlPath"
+'@ -replace 'TARGET_SLUG', $targetSlug `
+   -replace 'DATE', (Get-Date -Format 'yyyyMMdd') |
+   Out-File $htmlScript -Encoding UTF8 -Force
+
+powershell -NonInteractive -ExecutionPolicy Bypass -File $htmlScript
 ```
 
 Then confirm with a single short line -- do NOT print a summary or repeat findings in the CLI.
