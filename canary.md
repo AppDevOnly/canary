@@ -297,6 +297,50 @@ When flagging: name the specific pattern found and explain it in plain English:
 - Redirect chains: note if one URL redirects to another (common: tracking links -> phishing page)
 - Image `src` attributes: note if they use third-party CDN proxies (e.g. Google image proxy `ci3.googleusercontent.com`) -- these route images through trusted domains to evade content filters
 
+**URL shortener expansion (no sandbox required):**
+
+For any URL whose domain is a known shortener service (bit.ly, tinyurl.com, t.co, ow.ly, buff.ly,
+short.io, rebrand.ly, is.gd, v.gd, tiny.cc), resolve the final destination before doing any
+reputation checks. Never check the shortener domain itself -- the reputation of bit.ly is
+irrelevant; what matters is where it points.
+
+Two methods (try in order):
+
+1. **bit.ly info page** (bit.ly only, no API key): append `+` to the URL to get the info page,
+   which shows the long URL without following the redirect:
+   ```powershell
+   # e.g. https://bit.ly/abc123 -> https://bit.ly/abc123+
+   $infoUrl = $shortUrl -replace '(https?://bit\.ly/[^?#]+)', '$1+'
+   $response = Invoke-WebRequest $infoUrl -UseBasicParsing -ErrorAction SilentlyContinue
+   # Parse og:url or canonical link from response HTML for the long URL
+   if ($response.Content -match 'property="og:url" content="([^"]+)"') { $longUrl = $Matches[1] }
+   ```
+
+2. **HEAD request redirect follow** (all shorteners): follow HTTP redirects without downloading
+   the page body. Safe -- no page content executes on the host.
+   ```powershell
+   $req = [System.Net.HttpWebRequest]::Create($shortUrl)
+   $req.Method = 'HEAD'
+   $req.AllowAutoRedirect = $true
+   $req.Timeout = 5000
+   try {
+       $resp = $req.GetResponse()
+       $longUrl = $resp.ResponseUri.AbsoluteUri
+       $resp.Close()
+   } catch [System.Net.WebException] {
+       # WebException still contains the redirect location in some cases
+       if ($_.Exception.Response) { $longUrl = $_.Exception.Response.ResponseUri.AbsoluteUri }
+   }
+   ```
+
+After expansion: report both the short URL and the resolved destination. Apply all domain/IP
+checks (VT, DNSBL, Shodan, DNS) to the **destination domain**, not the shortener. Flag in the
+report: "Short URL `<shortener>` resolves to `<destination>`" -- this is the actionable IOC.
+
+If expansion fails (timeout, 4xx, private redirect): note "destination unknown -- short URL
+could not be resolved without visiting it; treat as suspicious." Do not attempt a full browser
+visit from the host.
+
 **Extract attachment info:**
 - `Content-Type`, `Content-Disposition`, filename, encoding
 - Flag executable or macro-enabled file types: .exe, .bat, .ps1, .vbs, .js, .doc/.docx with macros, .pdf with JavaScript
@@ -376,6 +420,10 @@ When both techniques appear together (fragmentation + garbage injection), always
 ---
 
 ### Step 3 -- Domain and IP checks
+
+**Write-then-execute rule (Step 3):** All Step 3 check blocks must be written to `C:\temp\$targetSlug-checks.ps1` using the Write tool, then run with:
+`powershell.exe -NonInteractive -ExecutionPolicy Bypass -File C:\temp\$targetSlug-checks.ps1`
+Never run Step 3 blocks via `-Command "..."` -- variables like `$zone` in foreach loops are misread as PowerShell drive references (e.g. `$zone:` becomes a drive specifier) when the script is passed as a double-quoted string through bash. The check script is deleted in the auto-cleanup block at the end of the analysis.
 
 **For each unique domain found (sender domain, linked domains, image domains):**
 
@@ -679,12 +727,14 @@ The index is append-only. Never delete prior entries. If the file grows beyond 5
 ```
 # Canary Threat Report: <subject line>
 
-Date: <date>
-Target: <victim name if personalized>, <subject line>.eml
-Sent: <Date header from email>
-From: <From header>
-Evaluation: Email threat analysis
-Tool: Canary v2.8
+| Field | Value |
+|-------|-------|
+| Date | <date> |
+| Target | <victim name if personalized>, <subject line>.eml |
+| Sent | <Date header from email> |
+| From | <From header> |
+| Evaluation | Email threat analysis |
+| Tool | Canary v2.8 |
 
 
 ## Reading This Report
@@ -722,13 +772,13 @@ One or two plain-English sentences: what this email is trying to do and what the
 
 One paragraph. What the email claims to be, what it actually is, and the key evidence.
 
-| Severity | Count |
-|----------|-------|
-| Critical | N |
-| High     | N |
-| Medium   | N |
-| Low      | N |
-| Info     | N |
+| Findings Severity | Count |
+|-------------------|-------|
+| CRITICAL | N |
+| HIGH     | N |
+| MEDIUM   | N |
+| LOW      | N |
+| INFO     | N |
 
 
 ## Findings Summary
@@ -748,7 +798,7 @@ One paragraph. What the email claims to be, what it actually is, and the key evi
 | Domain | Confidentiality / Integrity / Availability |
 | Category | Fraud / Obfuscation / Social Engineering / Infrastructure |
 | Indicator | <specific value: IP, domain, header value, etc.> |
-| MITRE | T1XXX - Tactic: Technique |
+| MITRE ATT&CK | T1XXX - Tactic: Technique |
 
 Plain-English explanation of what this means for the recipient. Technical detail follows.
 
@@ -777,6 +827,9 @@ MITRE ATT&CK(R) is a registered trademark of The MITRE Corporation and is used i
 with the MITRE ATT&CK Terms of Use. Technique mappings in this report reference the MITRE
 ATT&CK knowledge base, which is published under the Creative Commons Attribution 4.0 license.
 https://attack.mitre.org/resources/terms-of-use/
+
+This report references the D3FEND(TM) knowledge base. D3FEND is a trademark of The MITRE
+Corporation. https://d3fend.mitre.org
 
 List each technique observed as a table. Only include rows for techniques actually observed.
 Omit rows with no findings. Format:
@@ -881,6 +934,9 @@ https://github.com/AppDevOnly/canary
 
 This report references the MITRE ATT&CK(R) knowledge base. MITRE ATT&CK(R) is a registered
 trademark of The MITRE Corporation, used under CC BY 4.0. https://attack.mitre.org
+
+This report references the D3FEND(TM) knowledge base. D3FEND is a trademark of The MITRE
+Corporation. https://d3fend.mitre.org
 ```
 
 **Verdict options for email analysis:**
@@ -936,10 +992,12 @@ the user has already exported.
 ```
 # Canary Batch Email Report: <slug>
 
-Date: <date>
-Target: <directory path> (<N> emails)
-Evaluation: Batch email analysis
-Tool: Canary v2.8
+| Field | Value |
+|-------|-------|
+| Date | <date> |
+| Target | <directory path> (<N> emails) |
+| Evaluation | Batch email analysis |
+| Tool | Canary v2.8 |
 
 
 ## Reading This Report
@@ -983,13 +1041,13 @@ what the primary threat type is, and the key evidence.
 | [?] Inconclusive | N |
 | Total | N |
 
-| Severity | Finding Count |
-|----------|---------------|
-| Critical | N |
-| High | N |
-| Medium | N |
-| Low | N |
-| Info | N |
+| Findings Severity | Finding Count |
+|-------------------|---------------|
+| CRITICAL | N |
+| HIGH | N |
+| MEDIUM | N |
+| LOW | N |
+| INFO | N |
 
 
 ## Email Inventory
@@ -1028,7 +1086,7 @@ flags CRITICAL. Key Artifact is the single most actionable IOC per email.
 | Domain Age | Xd (created YYYY-MM-DD) |
 | Auth | SPF pass / DKIM pass / DMARC pass |
 | Artifacts | domain: example.com; email: foo@bar.com; url: https://...; file_id: abc123; phone: +1-... |
-| MITRE | T1XXX.XXX - Tactic: Technique |
+| MITRE ATT&CK | T1XXX.XXX - Tactic: Technique |
 
 Plain-English explanation of what this means for the recipient.
 
@@ -1204,6 +1262,9 @@ https://github.com/AppDevOnly/canary
 This report references the MITRE ATT&CK(R) knowledge base. MITRE ATT&CK(R) is a
 registered trademark of The MITRE Corporation, used under CC BY 4.0.
 https://attack.mitre.org
+
+This report references the D3FEND(TM) knowledge base. D3FEND is a trademark of The MITRE
+Corporation. https://d3fend.mitre.org
 ```
 
 ---
@@ -1421,10 +1482,12 @@ After all individual analyses complete, generate a campaign report:
 ```
 # Canary Inbox Analysis: <account> Spam Folder
 
-Date: <date>
-Account: <gmail/outlook account>
-Messages analyzed: N
-Tool: Canary v2.8
+| Field | Value |
+|-------|-------|
+| Date | <date> |
+| Account | <gmail/outlook account> |
+| Messages analyzed | N |
+| Tool | Canary v2.8 |
 
 ## Summary
 
@@ -1742,7 +1805,20 @@ If the fetch fails for any reason (no internet, timeout, parse error, etc.) -- s
 Do not output any message about the failure. Do not block the scan.
 If already up to date -- skip completely silently.
 
-If no target is provided, show this welcome message:
+If no target is provided, show this welcome message.
+
+First, output the logo below in a fenced code block (preserves monospace spacing):
+
+```
+ ██████╗  █████╗ ███╗   ██╗ █████╗ ██████╗ ██╗   ██╗
+██╔════╝ ██╔══██╗████╗  ██║██╔══██╗██╔══██╗╚██╗ ██╔╝
+██║      ███████║██╔██╗ ██║███████║██████╔╝  ╚████╔╝
+██║      ██╔══██║██║╚██╗██║██╔══██║██╔══██╗   ╚██╔╝
+╚██████╗ ██║  ██║██║ ╚████║██║  ██║██║  ██║    ██║
+ ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═══╝╚═╝  ╚═╝╚═╝  ╚═╝   ╚═╝
+```
+
+Then output the welcome text:
 
 > "Found something online and not sure if it's safe to install or run? Got a suspicious email?
 > That's what I'm for.
@@ -1754,21 +1830,27 @@ If no target is provided, show this welcome message:
 >
 > Just tell me what you want checked:
 >
->   Software and code:
->   /canary https://github.com/owner/repo         A project on GitHub, GitLab, or Bitbucket
->   /canary pip:packagename                        A Python package (something you'd pip install)
->   /canary npm:packagename                        A JavaScript package (something you'd npm install)
->   /canary cargo:packagename                      A Rust package
->   /canary nuget:packagename                      A .NET / C# package
->   /canary docker:imagename                       A Docker container image
->   /canary vscode:publisher.extensionname         A VS Code extension
->   /canary C:\path\to\project                     Code you already have on your computer
->   /canary pr https://github.com/.../pull/123     A code change you're reviewing before it merges
+> **Software and code:**
 >
->   Email:
->   /canary eml C:\path\to\email.eml               A single suspicious email (saved as .eml)
->   /canary inbox gmail                            Download and analyze your Gmail spam folder in bulk
->   /canary inbox outlook                          Download and analyze your Outlook junk folder in bulk
+> | Command | What it checks |
+> |---|---|
+> | `/canary https://github.com/owner/repo` | A project on GitHub, GitLab, or Bitbucket |
+> | `/canary pip:packagename` | A Python package (something you'd pip install) |
+> | `/canary npm:packagename` | A JavaScript package (something you'd npm install) |
+> | `/canary cargo:packagename` | A Rust package |
+> | `/canary nuget:packagename` | A .NET / C# package |
+> | `/canary docker:imagename` | A Docker container image |
+> | `/canary vscode:publisher.extensionname` | A VS Code extension |
+> | `/canary C:\path\to\project` | Code you already have on your computer |
+> | `/canary pr https://github.com/.../pull/123` | A code change you're reviewing before it merges |
+>
+> **Email:**
+>
+> | Command | What it checks |
+> |---|---|
+> | `/canary eml C:\path\to\email.eml` | A single suspicious email (saved as .eml) |
+> | `/canary inbox gmail` | Download and analyze your Gmail spam folder in bulk |
+> | `/canary inbox outlook` | Download and analyze your Outlook junk folder in bulk |
 >
 > How thorough should I be? (applies to software and code targets)
 >
@@ -2564,7 +2646,7 @@ Build a target-specific .wsb that maps (all read-only except tool-output):
 - `C:\sandbox\tool-output\` -> `C:\sandbox\tool-output\` (read-write -- tool results)
 - `$scanTempDir\` -> `C:\target-src\` (repo archive + extracted files)
 - `$pythonDir\` -> `C:\tools\python\` (python.exe)
-- `$pythonScriptsDir\` -> `C:\tools\python-scripts\` (semgrep and bandit entry points -- invoked via python.exe -m, not the .exe launcher)
+- `$pythonScriptsDir\` -> `C:\tools\python-scripts\` (semgrep and bandit binaries -- semgrep invoked directly as semgrep.exe; python.exe -m semgrep is deprecated since v1.38.0)
 - Directory containing the trufflehog binary -> `C:\tools\trufflehog\` (Go binary)
 - Directory containing the gitleaks binary -> `C:\tools\gitleaks\` (Go binary)
 
@@ -2586,13 +2668,10 @@ Start-Transcript 'C:\sandbox\tool-output\setup-static.log'
 $env:PATH = 'C:\tools\python;C:\tools\python-scripts;' + $env:PATH
 
 # 0. Verify mapped tools are callable (capability check)
-# Both semgrep and bandit use python.exe -m invocation, NOT the .exe launcher.
-# The .exe launchers (..\Scripts\semgrep.exe etc.) have the host Python path baked in at
-# install time. When the Scripts dir is mapped to a different path inside the sandbox
-# (C:\tools\python-scripts\), the launcher can't find its Python DLL and fails silently.
-# Calling python.exe -m semgrep / python.exe -m bandit avoids the launcher entirely
-# and works reliably with the mapped Python dir regardless of path differences.
-$semgrepAvail = [bool](& 'C:\tools\python\python.exe' -m semgrep --version 2>$null)
+# semgrep: invoke via binary directly (python.exe -m semgrep deprecated since v1.38.0).
+# semgrep.exe is mapped at C:\tools\python-scripts\semgrep.exe via the pythonScriptsDir mapping.
+# bandit: still uses python.exe -m bandit (no standalone binary -- pip-installed only).
+$semgrepAvail = [bool](& 'C:\tools\python-scripts\semgrep.exe' --version 2>$null)
 $banditAvail  = [bool](& 'C:\tools\python\python.exe' -m bandit --version 2>$null)
 
 if (-not $semgrepAvail) { Write-Host "WARN: semgrep not callable (python.exe -m semgrep) -- SAST uses Claude analysis" }
@@ -2619,12 +2698,24 @@ Write-Host "Extracted to $extractedRoot -- $((Get-ChildItem $extractedRoot -Recu
 # 2. Run semgrep
 if ($semgrepAvail) {
     Write-Host "Running semgrep..."
-    & 'C:\tools\python\python.exe' -m semgrep --config=auto --json $extractedRoot `
+    & 'C:\tools\python-scripts\semgrep.exe' --config=auto --json $extractedRoot `
         2>'C:\sandbox\tool-output\semgrep-stderr.txt' |
         Out-File 'C:\sandbox\tool-output\semgrep.json' -Encoding UTF8
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "TOOL ERROR semgrep exit=$LASTEXITCODE stderr=$(Get-Content 'C:\sandbox\tool-output\semgrep-stderr.txt' -Raw)"
-    } else { Write-Host "semgrep complete" }
+    $semgrepExit = $LASTEXITCODE
+    if ($semgrepExit -eq 0) {
+        Write-Host "semgrep complete"
+    } elseif ($semgrepExit -eq 2) {
+        # Exit 2 means either "scan completed with findings" OR "could not fetch rules"
+        # Distinguish by stderr content
+        $semgrepStderr = Get-Content 'C:\sandbox\tool-output\semgrep-stderr.txt' -Raw -ErrorAction SilentlyContinue
+        if ($semgrepStderr -match 'rules|network|connect|internet') {
+            Write-Host "SKIP semgrep -- could not fetch rules (network isolated sandbox). Install a local ruleset to enable semgrep in Medium mode."
+        } else {
+            Write-Host "semgrep complete (exit=2 with findings)"
+        }
+    } else {
+        Write-Host "TOOL ERROR semgrep exit=$semgrepExit stderr=$(Get-Content 'C:\sandbox\tool-output\semgrep-stderr.txt' -Raw)"
+    }
 } else { Write-Host "SKIP semgrep (not callable) -- Claude analysis covers this check" }
 
 # 3. Run bandit (Python projects only)
@@ -2711,6 +2802,7 @@ Advanced malware can escape sandbox boundaries by exploiting hypervisor vulnerab
 diffs the host state before and after the sandbox run to detect if anything escaped. It does not
 prevent escape -- it detects it. Run immediately after the sandbox closes.
 
+Write to `$scanTempDir\host-integrity-check.ps1`, then run with `-File`:
 ```powershell
 # Compare process list
 $afterProcs   = Get-Process | Select-Object Id, Name
@@ -2960,6 +3052,10 @@ Save state after Phase 3 completes.
 
 *Skip this phase if the user chose Quick or Medium, or if no sandbox is available.*
 
+**Write-then-execute rule (Phase 4):** All multi-line PowerShell in this phase must use the write-then-execute pattern. Use the Write tool to write the script to a `.ps1` file, then run it with:
+`powershell.exe -NonInteractive -ExecutionPolicy Bypass -File C:\path\to\script.ps1`
+Never pass multi-line PowerShell via `-Command "..."` -- bash escaping mangles `$variables`, pipes, backticks, and line breaks, producing silent failures or broken output. This applies to every code block below: Autoruns baseline, tshark capture, SAC toggle, integrity check, and any other multi-line block. Single-line one-liners (e.g. a single `Test-Path` call) may be run inline.
+
 **Static phases for Full:** Full mode always runs its own static sandbox pass (Phases 2b-2d) before Phase 4. Do not skip the static phases because a Medium scan was done previously -- Full runs a fresh pipeline.
 
 Exception: if a same-day Medium scan state file exists for this target with static phases marked complete, offer to reuse those results:
@@ -2973,7 +3069,7 @@ If Windows Sandbox is available:
 
 **Autoruns baseline and tshark capture  run before launching the sandbox:**
 
-
+Write to `$scanTempDir\phase4-autoruns-tshark.ps1`, then run with `-File`:
 ```powershell
 New-Item -ItemType Directory -Force -Path 'C:\sandbox\autoruns' | Out-Null
 New-Item -ItemType Directory -Force -Path 'C:\sandbox\tool-output' | Out-Null
@@ -3055,6 +3151,7 @@ Wait for explicit confirmation before touching SAC. If the user says no, skip to
 
 If the user says yes, disable SAC and **spawn a new PowerShell process** to pick up the change  the registry update only takes effect in a new session:
 
+Write to `$scanTempDir\phase4-sac-disable.ps1`, then run with `-File`:
 ```powershell
 # Disable SAC
 Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\CI\Policy' `
@@ -3069,6 +3166,7 @@ Record `$sacState` in the state file so it can be restored even if the session i
 
 After the sandbox run completes (success or failure), **always re-enable SAC** if it was active before:
 
+Write to `$scanTempDir\phase4-sac-restore.ps1`, then run with `-File`:
 ```powershell
 Set-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\CI\Policy' `
     -Name VerifiedAndReputablePolicyState -Value $sacState -Type DWord -Force
@@ -3420,6 +3518,62 @@ $state | ConvertTo-Json | Out-File "$HOME\canary-reports\$targetSlug-state.json"
 
 Note the cleanup result in the report. If deletion failed for any file, log the path and reason  do not silently skip.
 
+**Pre-publish checklist -- run before writing the report.**
+
+Full section specs are in REPORT-TEMPLATES.md. This checklist is a fast cross-check derived
+from that file. If this checklist and REPORT-TEMPLATES.md ever disagree, REPORT-TEMPLATES.md
+is the source of truth.
+
+Universal checks (all report types):
+
+- [ ] Severity values ALL CAPS everywhere: CRITICAL HIGH MEDIUM LOW INFO
+      Never: Critical, High, Medium, Low, Info
+- [ ] Executive summary findings count table header is `| Findings Severity | Count |`
+      Never: `| Severity | Count |`
+- [ ] Reading This Report severity legend header is `| Severity | Meaning |`
+      (different from count table -- this one is correct without "Findings")
+- [ ] Footer includes Canary version credit line and MITRE trademark notice
+- [ ] Footer includes D3FEND credit line IF AND ONLY IF at least one finding has a
+      Countermeasure field; omit D3FEND line otherwise
+
+Code scan specific (Quick / Medium / Full):
+
+- [ ] Reading This Report verdict table has exactly 5 rows with exact text:
+      [OK] Safe | [!] Caution | [X] Unsafe - Hidden Threat |
+      [X] Unsafe - Dangerous by Design | [?] Researcher Mode
+- [ ] MITRE ATT&CK section present (ALWAYS -- even if no MEDIUM+ findings;
+      write "No ATT&CK techniques mapped -- no significant security findings in this evaluation.")
+- [ ] Every Security/Secrets finding rated MEDIUM or above has a MITRE row in its table
+- [ ] Every MITRE ID in individual findings appears in the MITRE ATT&CK section table;
+      cross-check before finalizing
+- [ ] Security Analysis table header is `| Observation | What was observed |`
+      Never: `| Area | What was observed |`
+- [ ] Findings Summary rows match Findings section (count, numbering, titles)
+- [ ] Tool Coverage section: present for Medium and Full; OMIT for Quick
+- [ ] Evaluation field in report header table uses exact string:
+      Quick -- Static Analysis | Medium -- Static Analysis | Full -- Static + Dynamic Analysis
+
+Email analysis specific:
+
+- [ ] Reading This Report verdict table has exactly 6 rows with exact text:
+      [OK] Likely Legitimate | [!] Caution | [X] Phishing | [X] Scam |
+      [X] Malware Delivery | [?] Inconclusive
+- [ ] MITRE ATT&CK section present (same rule as code scan)
+- [ ] Tool Coverage section always present (unlike code scan, not conditional on tier)
+- [ ] Infrastructure Map section present with domains table, IPs table, and diagram
+
+Batch email specific:
+
+- [ ] Executive Summary has TWO tables: verdict counts table AND findings severity table
+- [ ] Email Inventory table present
+- [ ] Researcher Pivot Guide present with all IOC code blocks
+
+PR review specific:
+
+- [ ] Report header is flat fields (not a markdown table)
+- [ ] No MITRE ATT&CK section, no Token Usage section, no footer (lightweight by design)
+- [ ] Verdict uses three-way values only: [OK] Safe | [!] Caution | [X] Unsafe
+
 **Progress:** "Writing report..."
 
 Write the report to `~/canary-reports/<target-name>-<date>-canary-report.md`
@@ -3468,10 +3622,12 @@ the verdict in any direction. Read, find, rate, then conclude -- in that order.
 ```
 # Canary Security Report: <target> -- <verdict>
 
-Date: <date>
-Target: <url or path>
-Evaluation: <Quick / Medium / Full>  Static Analysis
-Tool: Canary v2.8
+| Field | Value |
+|-------|-------|
+| Date | <date> |
+| Target | <url or path> |
+| Evaluation | <Quick / Medium / Full>  Static Analysis |
+| Tool | Canary v2.8 |
 
 
 ## Reading This Report
@@ -3520,13 +3676,13 @@ possible gap or caveat. Examples of appropriate scope notes:
 Omit this note entirely if the scan was complete for its tier (e.g. a Full scan with
 all tools available and no caps hit).
 
-| Severity | Count |
-|----------|-------|
-| Critical | 0 |
-| High | 0 |
-| Medium | 0 |
-| Low | 0 |
-| Info | 0 |
+| Findings Severity | Count |
+|-------------------|-------|
+| CRITICAL | 0 |
+| HIGH | 0 |
+| MEDIUM | 0 |
+| LOW | 0 |
+| INFO | 0 |
 
 Recommendation: One sentence. What should the user do?
 
@@ -3557,8 +3713,8 @@ If no findings: replace the table with "No issues found.")
 | Severity | CRITICAL / HIGH / MEDIUM / LOW / INFO |
 | Domain | Confidentiality / Integrity / Availability |
 | Category | Security / Secrets / Dependencies / Quality / Bug |
-| File | path/to/file.py:42 |
-| MITRE | T1234.001 - Tactic Name: Technique Name _(omit row for Quality/Bug/Info findings)_ |
+| Location | path/to/file.py:42 |
+| MITRE ATT&CK | T1234.001 - Tactic Name: Technique Name _(omit row for Quality/Bug/Info findings)_ |
 
 One plain-English sentence leading with impact: what does this mean for the person reading the report, not what the tool found. Follow with technical detail (CVE IDs, file paths, package versions, code patterns) as supporting evidence. The first sentence must be understandable without any security background; the detail that follows is for readers who need to act on it.
 
@@ -3577,12 +3733,12 @@ One plain-English sentence leading with impact: what does this mean for the pers
 
 Based on static code review only. Full mode required to observe actual runtime behavior.
 
-| Area | What was observed |
-|------|-------------------|
-| Network activity | One line summary of what the code is written to contact. |
-| Credentials | One line summary. |
-| Persistence | One line summary. |
-| Process behavior | One line summary. |
+| Observation | What was observed |
+|-------------|-------------------|
+| Network activity | What the code is written to contact, or "No network activity identified in source code -- runtime connections not observed (Full mode required)." Never write "no C2 callbacks" or "no outbound connections" for static-only tiers. |
+| Credentials | Hardcoded or committed credentials found, or "None found in static review." |
+| Persistence | Persistence mechanisms identified in source, or "No persistence mechanisms identified in source code -- runtime persistence not observed (Full mode required)." Never write "no persistence found" for static-only tiers. |
+| Process behavior | Subprocess calls, shell invocations, or "No suspicious process behavior identified in source code -- runtime process activity not observed (Full mode required)." Never write "no processes spawned" for static-only tiers. |
 
 
 ## Network Indicators
@@ -3845,6 +4001,9 @@ installing any software. https://github.com/AppDevOnly/canary
 This report may reference the MITRE ATT&CK(R) knowledge base. MITRE ATT&CK(R) is a
 registered trademark of The MITRE Corporation, used under CC BY 4.0.
 https://attack.mitre.org
+
+This report may reference the D3FEND(TM) knowledge base. D3FEND is a trademark of The MITRE
+Corporation. https://d3fend.mitre.org
 ```
 
 Cache read % = cache_read / (input + cache_read) * 100, rounded to nearest integer.
@@ -3879,7 +4038,7 @@ $verdictText = if ($md -match 'Verdict: (\[.+?\][^\r\n]+)') { $Matches[1].Trim()
 # Severity uses bright alert colors (CRITICAL=#cf222e, HIGH=#e36209, MEDIUM=#9a6700, INFO=#0969da)
 # Verdict uses deep judgment colors in the same hue families but richer and darker
 $verdictColor = if     ($verdictText -match '^\[X\]')  { '#8b0000' }   # deep crimson (vs CRITICAL bright red)
-                elseif ($verdictText -match '^\[!\]')  { '#8b7a00' }   # deep yellow (distinct from MEDIUM amber #9a6700)
+                elseif ($verdictText -match '^\[!\]')  { '#6e6b00' }   # deep yellow (distinct from MEDIUM amber #9a6700)
                 elseif ($verdictText -match '^\[OK\]') { '#1a5c35' }   # forest green (not in severity palette)
                 elseif ($verdictText -match '^\[\?\]') { '#1e3a5f' }   # deep navy (vs INFO bright blue)
                 else                                   { '#374151' }   # charcoal
@@ -3984,19 +4143,28 @@ $body = [regex]::Replace($body, '(<td>)(INFO)(<\/td>)',     '$1<span style="back
 # Report verdict badges in Reading This Report table (deep judgment palette)
 $vb = 'color:#fff;padding:2px 8px;border-radius:3px;font-size:0.85em;font-weight:600;white-space:nowrap'
 $body = [regex]::Replace($body, '(<td>)(\[OK\] Safe)(<\/td>)',                        '$1<span style="background:#1a5c35;' + $vb + '">[OK] Safe</span>$3')
-$body = [regex]::Replace($body, '(<td>)(\[!\] Caution)(<\/td>)',                      '$1<span style="background:#8b7a00;' + $vb + '">[!] Caution</span>$3')
+$body = [regex]::Replace($body, '(<td>)(\[!\] Caution)(<\/td>)',                      '$1<span style="background:#6e6b00;' + $vb + '">[!] Caution</span>$3')
 $body = [regex]::Replace($body, '(<td>)(\[X\] Unsafe - Hidden Threat)(<\/td>)',       '$1<span style="background:#8b0000;' + $vb + '">[X] Unsafe - Hidden Threat</span>$3')
 $body = [regex]::Replace($body, '(<td>)(\[X\] Unsafe - Dangerous by Design)(<\/td>)', '$1<span style="background:#8b0000;' + $vb + '">[X] Unsafe - Dangerous by Design</span>$3')
 $body = [regex]::Replace($body, '(<td>)(\[\?\] Researcher Mode)(<\/td>)',              '$1<span style="background:#1e3a5f;' + $vb + '">[?] Researcher Mode</span>$3')
 
-# Report title block -- matches both "Canary Security Report" and "Canary Threat Report"
-# Structured as: report type label (uppercase) / Target: name / Verdict: bold text
+# Report title block -- two passes:
+# Pass 1: titles with inline verdict suffix ("Canary Security Report: target -- verdict")
 $body = [regex]::Replace($body,
     '<h1>(Canary [^:]+): (.+?) -- (.+?)</h1>',
     '<h1 style="background:' + $verdictColor + ';color:#fff;padding:1.25rem 1.5rem;border-radius:6px;margin-bottom:1.5rem;line-height:1.6;border:none">' +
     '<span style="font-size:1.5rem;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;display:block;margin-bottom:4px">$1</span>' +
     '<span style="font-size:0.9rem;font-weight:400;opacity:0.88;display:block">Target: &quot;$2&quot;</span>' +
     '<span style="font-size:0.9rem;font-weight:700;display:block">Verdict: $3</span>' +
+    '</h1>')
+# Pass 2: titles without inline verdict ("Canary Batch Email Report: slug", "Canary Inbox Analysis: ...")
+# Pull verdict from the ## Verdict: heading captured in $verdictText
+$body = [regex]::Replace($body,
+    '<h1>(Canary [^:]+): (.+?)</h1>',
+    '<h1 style="background:' + $verdictColor + ';color:#fff;padding:1.25rem 1.5rem;border-radius:6px;margin-bottom:1.5rem;line-height:1.6;border:none">' +
+    '<span style="font-size:1.5rem;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;display:block;margin-bottom:4px">$1</span>' +
+    '<span style="font-size:0.9rem;font-weight:400;opacity:0.88;display:block">Target: &quot;$2&quot;</span>' +
+    '<span style="font-size:0.9rem;font-weight:700;display:block">Verdict: ' + $verdictText + '</span>' +
     '</h1>')
 
 $reportTitle = [System.IO.Path]::GetFileNameWithoutExtension($htmlPath)
@@ -4066,6 +4234,7 @@ Respond to any plain-English problem description at any point during the evaluat
 - **Plain English**  explain what each finding means and why it matters, as if the user has no security background; this applies to all runtime output -- prompts, findings, status messages, error messages, and reports
 - **Actionable**  every finding includes a suggested fix or workaround; Security and Secrets findings rated MEDIUM or above include a Countermeasure line (plain English + D3FEND ID) that tells the user what systemic control to implement in their environment -- not just how to fix this package, but how to stop this class of attack from succeeding in the future
 - **Honest about limits**  note if a check wasn't possible (e.g. tool not installed, private repo, tool declined)
+- **No false negatives from static analysis**  Quick and Medium are static-only tiers. Never assert the absence of runtime behavior (e.g. "no C2 callbacks", "no persistence found", "no network activity observed") -- these imply runtime observation that did not occur. All negative findings in Quick/Medium reports must be scoped: write "not found in static review" or "not observed in source code", and note that Full mode is required to confirm runtime behavior. The Security Analysis table rows for Network activity, Persistence, and Process behavior must follow this pattern when no evidence was found: "No [X] identified in source code -- runtime behavior not observed (Full mode required)."
 - **Rate every finding:** CRITICAL / HIGH / MEDIUM / LOW / INFO
 - **No unsolicited comparisons**  don't compare to other reports unless the user asks
 - **No silent failures**  every tool check and phase transition reported explicitly
