@@ -3574,6 +3574,7 @@ $state | ConvertTo-Json | Out-File "$HOME\canary-reports\$targetSlug-state.json"
 
 Note the cleanup result in the report. If deletion failed for any file, log the path and reason  do not silently skip.
 
+
 **Pre-publish checklist -- run before writing the report.**
 
 Full section specs are in REPORT-TEMPLATES.md. This checklist is a fast cross-check derived
