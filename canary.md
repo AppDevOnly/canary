@@ -739,7 +739,7 @@ The index is append-only. Never delete prior entries. If the file grows beyond 5
 
 ## Reading This Report
 
-| Verdict | Meaning | What to do |
+| Report Verdict | Meaning | What to do |
 |---|---|---|
 | [OK] Likely Legitimate | No significant threat indicators found. | No action required. |
 | [!] Caution | Issues found, no proof of intentional harm. | Read findings before acting. |
@@ -756,7 +756,7 @@ The index is append-only. Never delete prior entries. If the file grows beyond 5
 | LOW | Minor signal. Low weight on its own. |
 | INFO | Informational. Context only. |
 
-| Security Domain | Question being answered |
+| Security Domain (CIA) | Question being answered |
 |---|---|
 | Confidentiality | Does this email attempt to steal your data or expose information about you? |
 | Integrity | Is this email what it claims to be? |
@@ -880,6 +880,39 @@ goal, infrastructure, obfuscation, sophistication, legal risk to victim.
 Each report stands independently -- this section adds context, not a shared verdict.)
 
 
+## Researcher Pivot Guide
+
+Structured IOC appendix for security researchers performing follow-on investigation.
+All IOCs are extracted from findings and tool output above -- no new analysis here.
+
+| Pivot | Starting point | Tool suggestion |
+|-------|---------------|-----------------|
+| Domain reputation | All Domains block below | VirusTotal, PassiveDNS, Shodan |
+| IP attribution | All IPs block below | Shodan, BGP.he.net, WHOIS |
+| URL redirect chain | All URLs block below | urlscan.io, VirusTotal URL scan |
+| Email address history | All Email Addresses block below | Have I Been Pwned, VT Search |
+
+All Domains
+```
+# One per line -- all domains extracted from headers and URLs
+```
+
+All IPs
+```
+# One per line -- all IPs from Received chain and DNS resolution
+```
+
+All Email Addresses
+```
+# One per line -- From, Reply-To, Return-Path, and any addresses in body
+```
+
+All URLs / File IDs
+```
+# One per line -- all links, redirect targets, and attachment file identifiers
+```
+
+
 ## Tool Coverage
 
 | Tool | Result | Notes |
@@ -927,14 +960,31 @@ if (Test-Path $checkScript) {
 Update the Cleanup table row with `$cleanupStatus`. Never write "safe to delete" -- the script must be deleted automatically. If deletion fails, the report must say so explicitly and give the user the exact path to remove manually.
 
 
+## Token Usage
+
+| Metric | Value |
+|--------|-------|
+| Input tokens | <N> |
+| Output tokens | <N> |
+| Cache read tokens | <N> (<X>% of input served from cache) |
+| Cache write tokens | <N> |
+| Estimated cost | ~$<N> (Sonnet 4.6 pricing) |
+
+Token counting follows the same timestamp-window method as code scan (see code scan Token
+Usage section). Email analysis typically runs in a single session window.
+
+
 ---
 Canary v2.8  use at your own risk. This tool reduces risk but does not guarantee safety.
-No security evaluation is a substitute for your own judgment.
-https://github.com/AppDevOnly/canary
+No security evaluation is a substitute for your own judgment. Review findings before
+acting on any email. https://github.com/AppDevOnly/canary
 
-This report references the MITRE ATT&CK(R) knowledge base. MITRE ATT&CK(R) is a registered
-trademark of The MITRE Corporation, used under CC BY 4.0. https://attack.mitre.org
+This report may reference the MITRE ATT&CK(R) knowledge base. MITRE ATT&CK(R) is a
+registered trademark of The MITRE Corporation, used under CC BY 4.0.
+https://attack.mitre.org
 
+_(Include the D3FEND line below only if at least one finding has a Countermeasure field.
+Omit it entirely otherwise.)_
 This report references the D3FEND(TM) knowledge base. D3FEND is a trademark of The MITRE
 Corporation. https://d3fend.mitre.org
 ```
@@ -1002,7 +1052,7 @@ the user has already exported.
 
 ## Reading This Report
 
-| Verdict | Meaning | What to do |
+| Report Verdict | Meaning | What to do |
 |---|---|---|
 | [OK] Likely Legitimate | No significant threat indicators found. | No action required. |
 | [!] Caution | Issues found, no proof of intentional harm. | Read findings before acting. |
@@ -1018,6 +1068,12 @@ the user has already exported.
 | MEDIUM | Supporting evidence. Consistent with the verdict. |
 | LOW | Minor signal. Low weight on its own. |
 | INFO | Informational. Context only. |
+
+| Security Domain (CIA) | Question being answered |
+|---|---|
+| Confidentiality | Does this email attempt to steal your data or expose information about you? |
+| Integrity | Is this email what it claims to be? |
+| Availability | Could acting on this email harm your systems or accounts? |
 
 
 ## Verdict: <highest-severity verdict> (<count> of <N> emails)
@@ -3552,6 +3608,8 @@ Code scan specific (Quick / Medium / Full):
 - [ ] Tool Coverage section: present for Medium and Full; OMIT for Quick
 - [ ] Evaluation field in report header table uses exact string:
       Quick -- Static Analysis | Medium -- Static Analysis | Full -- Static + Dynamic Analysis
+- [ ] Researcher Pivot Guide section: present when verdict is [!] Caution, [X] Unsafe, or
+      [?] Researcher Mode; OMIT for [OK] Safe verdicts
 
 Email analysis specific:
 
@@ -3561,6 +3619,9 @@ Email analysis specific:
 - [ ] MITRE ATT&CK section present (same rule as code scan)
 - [ ] Tool Coverage section always present (unlike code scan, not conditional on tier)
 - [ ] Infrastructure Map section present with domains table, IPs table, and diagram
+- [ ] Researcher Pivot Guide section always present (all email verdicts; populate IOC blocks
+      even for [OK] Likely Legitimate -- attacker infrastructure is still a pivot target)
+- [ ] Token Usage section present (after Cleanup, before footer)
 
 Batch email specific:
 
@@ -3640,7 +3701,7 @@ the verdict in any direction. Read, find, rate, then conclude -- in that order.
 | [X] Unsafe - Dangerous by Design | Software's purpose is inherently dangerous (exploit kit, C2 framework, RAT, keylogger). | Do not install without understanding the implications. |
 | [?] Researcher Mode | Offensive tool scanned at user's request. | No safety verdict issued. |
 
-| Findings Severity | Meaning |
+| Severity | Meaning |
 |---|---|
 | CRITICAL | Immediate threat. Do not proceed until resolved. |
 | HIGH | Serious risk with direct security or reliability impact. |
@@ -3648,7 +3709,7 @@ the verdict in any direction. Read, find, rate, then conclude -- in that order.
 | LOW | Minor concern. Low likelihood or low impact. |
 | INFO | Informational only. No action required. |
 
-| Security Domain | Question being answered |
+| Security Domain (CIA) | Question being answered |
 |---|---|
 | Confidentiality | Will this software keep my data private? |
 | Integrity | Is this software what it claims to be? |
@@ -3841,6 +3902,49 @@ Pivot Recommendations block (2-4 bullets) with actionable next steps for a secur
 Omit this block entirely for [OK] Safe verdicts.
 
 
+## Researcher Pivot Guide
+
+_(CONDITIONAL: include when verdict is [!] Caution, [X] Unsafe, or [?] Researcher Mode.
+Omit entirely for [OK] Safe verdicts -- researchers have nothing to pivot from.)_
+
+Structured IOC appendix for security researchers performing follow-on investigation.
+All IOCs are extracted from findings and tool output above -- no new analysis here.
+
+| Pivot | Starting point | Tool suggestion |
+|-------|---------------|-----------------|
+| Domain reputation | All Domains block below | VirusTotal, Shodan, PassiveDNS |
+| IP attribution | All IPs block below | Shodan, BGP.he.net, WHOIS |
+| File threat intel | File Hashes block below | VirusTotal, MalwareBazaar |
+| Dependency CVEs | Vulnerable Packages block below | NVD, OSV, Snyk |
+| Secrets rotation | Secrets/Tokens block below | Provider revocation + audit log |
+
+All Domains / URLs
+```
+# One per line -- domains and URLs identified as potentially malicious or suspicious
+```
+
+All IPs
+```
+# One per line -- IPs identified in network activity, C2, or exfiltration findings
+```
+
+File Hashes (SHA256)
+```
+# filename : sha256hash -- binaries flagged by VT or identified in malicious findings
+```
+
+Vulnerable Packages (CVE)
+```
+# package@version CVE-YYYY-NNNNN SEVERITY -- from dependency audit findings
+```
+
+Secrets / Tokens (CONDITIONAL: omit section if no secrets findings)
+```
+# type : partial-value-only (NEVER write the full secret) -- from secrets findings
+# e.g.: AWS_ACCESS_KEY : AKIA...XXXX (redacted) -- found in src/config.py:12
+```
+
+
 ## VirusTotal
 
 Include this section only if VT_API_KEY was set during the scan. If not configured, write:
@@ -4002,7 +4106,9 @@ This report may reference the MITRE ATT&CK(R) knowledge base. MITRE ATT&CK(R) is
 registered trademark of The MITRE Corporation, used under CC BY 4.0.
 https://attack.mitre.org
 
-This report may reference the D3FEND(TM) knowledge base. D3FEND is a trademark of The MITRE
+_(Include the D3FEND line below only if at least one finding has a Countermeasure field.
+Omit it entirely otherwise.)_
+This report references the D3FEND(TM) knowledge base. D3FEND is a trademark of The MITRE
 Corporation. https://d3fend.mitre.org
 ```
 
